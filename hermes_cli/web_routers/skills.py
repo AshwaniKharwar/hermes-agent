@@ -426,6 +426,7 @@ async def get_skill_workflows(name: str, profile: Optional[str] = None):
         for source in workflow_sources(name):
             row = {"name": source.path.stem, "source": source.source, "stale": source.stale, "path": str(source.path)}
             try:
+                row["yaml"] = source.path.read_text(encoding="utf-8")
                 workflow = validate_workflow(_load_yaml(source.path), skill=name)
                 row.update({"status": "stale" if source.stale else "valid", "workflow": workflow,
                             "mermaid": render_mermaid(workflow)})
@@ -460,6 +461,35 @@ async def generate_skill_workflow(name: str, profile: Optional[str] = None):
         return await scoped_to_thread(profile, _generate)
     except WorkflowError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/workflows")
+async def list_workflows(profile: Optional[str] = None):
+    """Read existing workflow files only; page loads never generate overlays."""
+    def _read():
+        from agent.workflows import WorkflowError, _load_yaml, workflow_sources
+        from tools.skills_tool import _find_all_skills
+
+        rows = []
+        for skill in _find_all_skills():
+            sources = {source.path.stem: source for source in workflow_sources(skill["name"])}
+            for name, source in sources.items():
+                state, message = ("stale", None) if source.stale else ("ready", None)
+                try:
+                    _load_yaml(source.path)
+                except WorkflowError as exc:
+                    state, message = "invalid", str(exc)
+                rows.append({"skill": skill["name"], "workflow": name, "source": source.source,
+                             "state": state, "message": message})
+        return {"workflows": rows}
+    return await scoped_to_thread(profile, _read)
+
+
+@router.post("/api/workflows/generate")
+async def generate_missing_workflows(profile: Optional[str] = None):
+    """Explicit batch action for missing/stale eligible skill workflows."""
+    return spawn_profile_action(profile, ["workflow", "generate", "--all"], "workflows-generate",
+                                log_msg="Failed to spawn workflow generation", prefix="Failed to generate workflows")
 
 
 @router.post("/api/skills")

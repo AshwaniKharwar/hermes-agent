@@ -405,6 +405,11 @@ class SkillUninstallRequest(BaseModel):
 class SkillsUpdateRequest(BaseModel):
     profile: Optional[str] = None
 
+class WorkflowGenerateRequest(BaseModel):
+    name: Optional[str] = None
+    workflow: str = "default"
+    profile: Optional[str] = None
+
 class ProfileCreate(BaseModel):
     name: str
     clone_from: Optional[str] = None
@@ -519,4 +524,3 @@ class _PluginProvidersPutBody(BaseModel):
 
 class _PluginVisibilityBody(BaseModel):
     hidden: bool
-

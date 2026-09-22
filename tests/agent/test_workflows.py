@@ -9,16 +9,16 @@ from agent.workflows import WorkflowError, _fingerprint, execute_workflow, rende
 
 def _workflow():
     return {
-        "schema": "hermes/workflow@1", "id": "default", "skill": "research",
+        "schema": "hermes/workflow@2", "id": "default", "skill": "research",
         "entry": "collect", "max_transitions": 3,
         "input_schema": {"type": "object"},
         "steps": {
             "collect": {
-                "instructions": "Collect facts.", "input": {"request": "$input.request"},
+                "kind": "task", "instructions": "Collect facts.", "input": {"request": "$input.request"},
                 "output_schema": {"type": "object", "required": ["facts"]}, "next": "write",
             },
             "write": {
-                "instructions": "Write the answer.", "input": {"facts": "$steps.collect.output.facts"},
+                "kind": "task", "instructions": "Write the answer.", "input": {"facts": "$steps.collect.output.facts"},
                 "output_schema": {"type": "object", "required": ["answer"]}, "next": "END",
             },
         },
@@ -53,12 +53,46 @@ def test_workflow_rejects_unsafe_bindings_and_dead_steps():
     with pytest.raises(WorkflowError, match="Unreachable"):
         validate_workflow(dead)
 
+    legacy = _workflow()
+    legacy["schema"] = "hermes/workflow@1"
+    with pytest.raises(WorkflowError, match="hermes/workflow@2"):
+        validate_workflow(legacy)
+
 
 def test_mermaid_contains_routes_and_model_labels():
     graph = _workflow()
     graph["steps"]["collect"]["route"] = {"model": "fast"}
     diagram = render_mermaid(graph)
     assert "collect" in diagram and "fast" in diagram and "END" in diagram
+
+
+def test_loop_routes_retries_to_an_explicit_exhausted_path():
+    workflow = {
+        "schema": "hermes/workflow@2", "id": "default", "skill": "research", "entry": "collect", "max_transitions": 8,
+        "steps": {
+            "collect": {"kind": "task", "instructions": "Collect.", "next": "enough"},
+            "enough": {
+                "kind": "loop", "instructions": "Check whether enough facts exist.", "max_iterations": 2,
+                "repeat": "retry", "on_exhausted": "shortfall",
+                "output_schema": {"type": "object", "required": ["transition"], "properties": {"transition": {"enum": ["done", "retry"]}}},
+                "branches": {"done": "deliver", "retry": "collect"},
+            },
+            "deliver": {"kind": "task", "instructions": "Deliver.", "next": "END"},
+            "shortfall": {"kind": "task", "instructions": "Report shortfall.", "next": "END"},
+        },
+        "output": {},
+    }
+    calls = []
+
+    def run_step(step_id, _step, _context):
+        calls.append(step_id)
+        return {"transition": "retry"} if step_id == "enough" else {}
+
+    execute_workflow(workflow, {}, run_step)
+
+    assert calls == ["collect", "enough", "collect", "enough", "shortfall"]
+    diagram = render_mermaid(workflow)
+    assert "enough{" in diagram and "repeat_max_2" in diagram and "exhausted" in diagram
 
 
 def test_workflow_fingerprint_includes_procedure_support_files(tmp_path):

@@ -21,8 +21,9 @@ import yaml
 from hermes_constants import get_hermes_home
 from utils import atomic_write_text
 
-SCHEMA = "hermes/workflow@1"
+SCHEMA = "hermes/workflow@2"
 END = "END"
+NODE_KINDS = frozenset({"task", "decision", "loop"})
 _BINDING = re.compile(r"^\$(?:input(?:\.[A-Za-z_][\w-]*)*|steps\.[A-Za-z_][\w-]*\.output(?:\.[A-Za-z_][\w-]*)*)$")
 _SECRET = re.compile(r"(?:api[_-]?key|secret|password|token)\s*$", re.I)
 
@@ -124,7 +125,7 @@ def validate_workflow(workflow: Mapping[str, Any], *, skill: Optional[str] = Non
     entry = data.get("entry")
     if entry not in steps:
         raise WorkflowError("entry must name a step.")
-    max_transitions = data.get("max_transitions", 1)
+    max_transitions = data.get("max_transitions")
     if not isinstance(max_transitions, int) or isinstance(max_transitions, bool) or not 1 <= max_transitions <= 1000:
         raise WorkflowError("max_transitions must be an integer between 1 and 1000.")
     defaults = data.get("defaults", {})
@@ -135,14 +136,18 @@ def validate_workflow(workflow: Mapping[str, Any], *, skill: Optional[str] = Non
             raise WorkflowError(f"defaults.{key} has the wrong type.")
     seen: set[str] = set()
     targets: set[str] = set()
+    edges: dict[str, list[str]] = {}
     for step_id, step in steps.items():
-        if not isinstance(step_id, str) or not re.match(r"^[A-Za-z_][\w-]*$", step_id):
+        if not isinstance(step_id, str) or step_id == END or not re.match(r"^[A-Za-z_][\w-]*$", step_id):
             raise WorkflowError("step ids must be identifiers.")
         if step_id in seen:
             raise WorkflowError(f"Duplicate step id {step_id!r}.")
         seen.add(step_id)
         if not isinstance(step, Mapping):
             raise WorkflowError(f"steps.{step_id} must be a mapping.")
+        kind = step.get("kind")
+        if kind not in NODE_KINDS:
+            raise WorkflowError(f"steps.{step_id}.kind must be task, decision, or loop.")
         if not isinstance(step.get("instructions"), str) or not step["instructions"].strip():
             raise WorkflowError(f"steps.{step_id}.instructions is required.")
         bindings = step.get("input", {})
@@ -161,31 +166,93 @@ def validate_workflow(workflow: Mapping[str, Any], *, skill: Optional[str] = Non
         toolsets = step.get("toolsets", defaults.get("toolsets", []))
         if not isinstance(toolsets, list) or not all(isinstance(item, str) and item for item in toolsets):
             raise WorkflowError(f"steps.{step_id}.toolsets must be a list of names.")
-        nxt = step.get("next", END)
-        if isinstance(nxt, str):
+        if kind == "task":
+            nxt = step.get("next")
+            if not isinstance(nxt, str) or not nxt:
+                raise WorkflowError(f"steps.{step_id}.next must name one target.")
+            if any(key in step for key in ("branches", "repeat", "max_iterations", "on_exhausted")):
+                raise WorkflowError(f"steps.{step_id} is a task; use only next.")
+            edges[step_id] = [nxt]
             targets.add(nxt)
-        elif isinstance(nxt, Mapping) and nxt:
-            if "transition" not in (step.get("output_schema", {}).get("properties", {}) or {}):
-                raise WorkflowError(f"steps.{step_id} branches but its output schema lacks transition.")
-            targets.update(nxt.values())
-        else:
-            raise WorkflowError(f"steps.{step_id}.next must be a target or transition map.")
+            continue
+
+        if "next" in step:
+            raise WorkflowError(f"steps.{step_id} is a {kind}; use branches, not next.")
+        branches = step.get("branches")
+        if not isinstance(branches, Mapping) or not branches or not all(
+            isinstance(label, str) and label and isinstance(target, str) and target
+            for label, target in branches.items()
+        ):
+            raise WorkflowError(f"steps.{step_id}.branches must map non-empty labels to targets.")
+        transition = (step.get("output_schema", {}).get("properties", {}) or {}).get("transition")
+        enum = transition.get("enum") if isinstance(transition, Mapping) else None
+        required = step.get("output_schema", {}).get("required", [])
+        if (not isinstance(enum, list) or not all(isinstance(label, str) and label for label in enum)
+                or set(enum) != set(branches) or not isinstance(required, list) or "transition" not in required):
+            raise WorkflowError(f"steps.{step_id}.output_schema transition enum must exactly match branches.")
+        if kind == "decision" and any(key in step for key in ("repeat", "max_iterations", "on_exhausted")):
+            raise WorkflowError(f"steps.{step_id} is a decision; loop settings are not allowed.")
+        edges[step_id] = list(branches.values())
+        targets.update(branches.values())
+        if kind == "loop":
+            limit = step.get("max_iterations")
+            repeat = step.get("repeat")
+            exhausted = step.get("on_exhausted")
+            if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 1000:
+                raise WorkflowError(f"steps.{step_id}.max_iterations must be an integer between 1 and 1000.")
+            if not isinstance(repeat, str) or repeat not in branches:
+                raise WorkflowError(f"steps.{step_id}.repeat must name a branch.")
+            if not isinstance(exhausted, str) or not exhausted:
+                raise WorkflowError(f"steps.{step_id}.on_exhausted must name a target.")
+            edges[step_id].append(exhausted)
+            targets.add(exhausted)
     unknown = {target for target in targets if target != END and target not in steps}
     if unknown:
         raise WorkflowError(f"Unknown step target(s): {', '.join(sorted(unknown))}.")
-    # Reachability catches dead authored steps without attempting to prove a
-    # loop terminates; max_transitions is the explicit safety bound.
+    # Reachability catches dead authored steps. Per-loop limits bound authored
+    # cycles; max_transitions is the whole-run safety backstop.
     reachable, pending = set(), [entry]
     while pending:
         step_id = pending.pop()
         if step_id in reachable or step_id == END:
             continue
         reachable.add(step_id)
-        nxt = steps[step_id].get("next", END)
-        pending.extend([nxt] if isinstance(nxt, str) else list(nxt.values()))
+        pending.extend(edges[step_id])
     dead = set(steps) - reachable
     if dead:
         raise WorkflowError(f"Unreachable step(s): {', '.join(sorted(dead))}.")
+    for step_id, step in steps.items():
+        if step["kind"] != "loop":
+            continue
+        pending, seen_targets = [step["branches"][step["repeat"]]], set()
+        while pending:
+            target = pending.pop()
+            if target == step_id:
+                break
+            if target in seen_targets or target == END:
+                continue
+            seen_targets.add(target)
+            pending.extend(edges[target])
+        else:
+            raise WorkflowError(f"steps.{step_id}.repeat must lead back to the loop.")
+
+    visiting, visited = [], set()
+
+    def visit(step_id: str) -> None:
+        if step_id == END or step_id in visited:
+            return
+        if step_id in visiting:
+            cycle = visiting[visiting.index(step_id):]
+            if not any(steps[item]["kind"] == "loop" for item in cycle):
+                raise WorkflowError(f"Cycle {' -> '.join(cycle)} must include a loop node.")
+            return
+        visiting.append(step_id)
+        for target in edges[step_id]:
+            visit(target)
+        visiting.pop()
+        visited.add(step_id)
+
+    visit(entry)
     data["steps"] = {str(key): dict(value) for key, value in steps.items()}
     data["defaults"] = dict(defaults)
     data["max_transitions"] = max_transitions
@@ -225,19 +292,30 @@ def _receipt_value(value: Any) -> Any:
 
 def render_mermaid(workflow: Mapping[str, Any]) -> str:
     graph = validate_workflow(workflow)
-    lines = ["flowchart TD"]
+    lines = ["flowchart TD", f"  workflow_start([START]) --> {graph['entry']}", "  workflow_end((END))"]
     for step_id, step in graph["steps"].items():
         label = step_id.replace('"', "'")
         route = step.get("route", graph["defaults"].get("route", {}))
         model = route.get("model") if isinstance(route, Mapping) else None
         suffix = "\\n" + str(model) if model else ""
-        lines.append(f'  {step_id}["{label}{suffix}"]')
-        nxt = step.get("next", END)
-        if isinstance(nxt, str):
-            lines.append(f"  {step_id} --> {'done((END))' if nxt == END else nxt}")
+        if step["kind"] == "decision":
+            lines.append(f"  {step_id}{{{label}}}")
+        elif step["kind"] == "loop":
+            lines.append(f"  {step_id}([{label} loop max {step['max_iterations']}])")
         else:
-            for transition, target in nxt.items():
-                lines.append(f"  {step_id} -->|{str(transition).replace('|', '/')}| {'done((END))' if target == END else target}")
+            lines.append(f'  {step_id}["{label}{suffix}"]')
+        if step["kind"] == "task":
+            target = step["next"]
+            lines.append(f"  {step_id} --> {'workflow_end' if target == END else target}")
+            continue
+        for transition, target in step["branches"].items():
+            edge_label = re.sub(r"[^A-Za-z0-9_-]+", "_", str(transition)).strip("_") or "branch"
+            if step["kind"] == "loop" and transition == step["repeat"]:
+                edge_label += f"_max_{step['max_iterations']}"
+            lines.append(f"  {step_id} -->|{edge_label}| {'workflow_end' if target == END else target}")
+        if step["kind"] == "loop":
+            target = step["on_exhausted"]
+            lines.append(f"  {step_id} -. exhausted .-> {'workflow_end' if target == END else target}")
     return "\n".join(lines)
 
 
@@ -293,7 +371,7 @@ def execute_workflow(
     """Run a validated graph with an injected isolated-agent step executor."""
     graph = validate_workflow(workflow)
     state: Dict[str, Any] = {"input": dict(inputs), "steps": {}}
-    current, transitions = graph["entry"], 0
+    current, transitions, loop_repeats = graph["entry"], 0, {}
     run_id = uuid.uuid4().hex
     events: list[Dict[str, Any]] = []
     if receipt_path is not None:
@@ -308,8 +386,15 @@ def execute_workflow(
         output = dict(run_step(current, step, {"input": resolved_input, "route": route, "workflow": graph}))
         execution = output.pop("__workflow_meta__", None)
         state["steps"][current] = {"output": output}
-        nxt = step.get("next", END)
-        chosen = nxt if isinstance(nxt, str) else nxt.get(output.get("transition"))
+        if step["kind"] == "task":
+            chosen = step["next"]
+        else:
+            transition = output.get("transition")
+            chosen = step["branches"].get(transition)
+            if step["kind"] == "loop" and transition == step["repeat"]:
+                loop_repeats[current] = loop_repeats.get(current, 0) + 1
+                if loop_repeats[current] >= step["max_iterations"]:
+                    chosen = step["on_exhausted"]
         if chosen is None:
             raise WorkflowError(f"Step {current!r} returned unknown transition {output.get('transition')!r}.")
         event = {"run_id": run_id, "skill": graph["skill"], "workflow": graph["id"], "step": current,

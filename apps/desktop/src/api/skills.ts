@@ -5,6 +5,7 @@ import type {
   SkillHubSearchResponse,
   SkillHubSourcesResponse,
   SkillInfo,
+  WorkflowIndexResponse,
   WorkflowGenerationStatus,
   StarmapGraph
 } from '@/types/hermes'
@@ -39,6 +40,8 @@ export interface SkillWorkflowInfo {
   stale: boolean
   status: 'invalid' | 'stale' | 'valid'
   workflow?: Record<string, unknown>
+  /** Original workflow file contents, not the validated graph representation. */
+  yaml?: string
 }
 
 export function getSkillWorkflows(
@@ -56,6 +59,17 @@ export function generateSkillWorkflow(name: string, profile?: ProfileScope): Pro
     ...capabilityScoped(profile),
     path: `/api/skills/workflows/generate?name=${encodeURIComponent(name)}`,
     method: 'POST'
+  })
+}
+
+/** Existing packaged/overlay workflows across the selected profile. */
+export function getWorkflows(profile?: ProfileScope): Promise<WorkflowIndexResponse> {
+  return window.hermesDesktop.api<WorkflowIndexResponse>({ ...capabilityScoped(profile), path: '/api/workflows' })
+}
+
+export function generateWorkflows(profile?: ProfileScope): Promise<ActionResponse> {
+  return window.hermesDesktop.api<ActionResponse>({
+    ...capabilityScoped(profile), path: '/api/workflows/generate', method: 'POST', body: {}
   })
 }
 

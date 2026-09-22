@@ -411,7 +411,7 @@ _SKILL_REVIEW_PROMPT = (
     "run rather than hand-type each time).\n"
     "     Add support files via skill_manage action=write_file with file_path starting "
     "'references/', 'templates/', 'scripts/', or 'workflows/'. A new skill with a repeatable procedure "
-    "must include workflows/default.yaml in the same atomic operations call; it must be hermes/workflow@1 "
+    "must include workflows/default.yaml in the same atomic operations call; it must be hermes/workflow@2 "
     "YAML with real steps, never a synthetic fallback. The umbrella's SKILL.md should gain a one-line "
     "pointer to any new support file so future agents know it exists.\n"
     "  4. CREATE A NEW CLASS-LEVEL UMBRELLA SKILL when no existing skill covers the class. The "

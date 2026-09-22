@@ -302,8 +302,4 @@ native/fts5_cjk/*.so
 # Disposable profile created by scripts/probe_active_session_exclusivity.py
 .probe-home/
 
-# BEGIN TLDRGRAPH
-# TLDRGraph generated workflow state.
 .tldrgraph/*
-!.tldrgraph/AGENT_CONTRACT.md
-# END TLDRGRAPH

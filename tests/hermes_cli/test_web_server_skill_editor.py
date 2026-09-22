@@ -31,6 +31,19 @@ def _write_skill(skills_dir, name):
     (d / "SKILL.md").write_text(SKILL_MD.format(name=name), encoding="utf-8")
 
 
+WORKFLOW_YAML = """schema: hermes/workflow@2
+id: default
+skill: dashboard-skill
+entry: collect
+max_transitions: 1
+steps:
+  collect:
+    kind: task
+    instructions: Collect facts.
+    next: END
+"""
+
+
 @pytest.fixture
 def isolated_profiles(tmp_path, monkeypatch, _isolate_hermes_home):
     """Isolated default home + one named profile, each with its own skills."""
@@ -87,6 +100,16 @@ class TestSkillContent:
         # ...and the worker skill is invisible without the profile param.
         resp = client.get("/api/skills/content", params={"name": "worker-skill"})
         assert resp.status_code == 404
+
+    def test_workflow_response_includes_original_yaml(self, client, isolated_profiles):
+        workflows = isolated_profiles["default"] / "skills" / "dashboard-skill" / "workflows"
+        workflows.mkdir()
+        (workflows / "default.yaml").write_text(WORKFLOW_YAML, encoding="utf-8")
+
+        response = client.get("/api/skills/workflows", params={"name": "dashboard-skill"})
+
+        assert response.status_code == 200
+        assert response.json()["workflows"][0]["yaml"] == WORKFLOW_YAML
 
 
 class TestSkillCreate:

@@ -18,8 +18,9 @@ import {
   getLearningNode,
   getProfiles,
   getSkillContent,
-  generateSkillWorkflow,
-  getSkillWorkflows,
+  getWorkflows,
+  generateWorkflows,
+  getActionStatus,
   getSkills,
   getToolsets,
   getUsageAnalytics,
@@ -70,11 +71,11 @@ import { PluginActions, PluginsTab } from './plugins-tab'
 import { SkillCatalog } from './skill-catalog'
 import { $skillsSortDesc, $toolsetsSortDesc } from './store'
 import { UpdateSkillsButton } from './update-skills-button'
-import MermaidRenderer from '@/components/assistant-ui/embeds/mermaid-embed'
+import { WorkflowVisualizer } from './workflow-visualizer'
 
 // Skills Hub browsing lives inside the Skills tab. Legacy `?tab=hub`
 // links fall back to 'skills' via useRouteEnumParam.
-const SKILLS_MODES = ['skills', 'toolsets', 'mcp', 'plugins'] as const
+const SKILLS_MODES = ['skills', 'workflows', 'toolsets', 'mcp', 'plugins'] as const
 
 // Skills + toolsets live in the RQ cache so switching tabs/pages paints the
 // cached lists instantly (no reload flash) and mount only fires a deduped
@@ -780,6 +781,7 @@ export function SkillsView({
       searchValue={query}
       tabs={[
         { id: 'skills', label: t.skills.tabSkills, meta: skills?.length ?? null },
+        { id: 'workflows', label: 'Workflows' },
         { id: 'toolsets', label: t.skills.tabToolsets, meta: toolsets ? visibleToolsetCount(toolsets) : null },
         { id: 'mcp', label: t.skills.tabMcp },
         { id: 'plugins', label: t.skills.tabPlugins }
@@ -812,6 +814,8 @@ export function SkillsView({
                 scopeLabel={scopeLabel}
                 view={capabilityView}
               />
+            ) : mode === 'workflows' ? (
+              <WorkflowsTab profile={scopeProfile} query={query} />
             ) : mode === 'mcp' ? (
               // The gateway instance backs ONLY the live `reload.mcp` RPC, and
               // it is the ACTIVE gateway's socket — for a scope pinned to a
@@ -1064,16 +1068,6 @@ function SkillDetail({
     queryFn: () => getSkillContent(skill.name, profile),
     staleTime: 60_000
   })
-  const workflowQuery = useQuery({
-    queryKey: ['skill-workflows', skill.name, profileScopeKey(profile)],
-    queryFn: () => getSkillWorkflows(skill.name, profile),
-    staleTime: 60_000
-  })
-  const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null)
-  const workflow = workflowQuery.data?.workflows.find(item => item.name === selectedWorkflow)
-    ?? workflowQuery.data?.workflows[0]
-  const workflowEligible = workflowQuery.data?.workflow_eligible ?? skill.workflow_eligible === true
-  const workflowGeneration = workflowQuery.data?.workflow_generation ?? skill.workflow_generation
 
   const parsed = useMemo(
     () => (contentQuery.data ? parseFrontmatter(contentQuery.data.content) : null),
@@ -1116,6 +1110,7 @@ function SkillDetail({
           ))}
         </div>
       )}
+      <WorkflowVisualizer profile={profile} skill={skill.name} />
       {contentQuery.isLoading ? (
         <CountSkeleton />
       ) : parsed ? (
@@ -1126,33 +1121,39 @@ function SkillDetail({
           {parsed.body.trim() || t.skills.noDescription}
         </pre>
       ) : null}
-      <section className="grid gap-2">
-        <h3 className="text-sm font-medium">Workflow</h3>
-        {workflowQuery.isLoading ? <CountSkeleton /> : workflowQuery.data?.status === 'missing' ? (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
-            <span>No executable workflow yet.</span>
-            {workflowGeneration?.status === 'failed' && <span className="text-destructive">{workflowGeneration.error ?? 'Generation failed.'}</span>}
-            {workflowEligible && <Button onClick={() => void generateSkillWorkflow(skill.name, profile).then(() => workflowQuery.refetch())} size="xs" variant="secondary">Generate</Button>}
-          </div>
-        ) : workflow ? (
-          <>
-            {(workflowQuery.data?.workflows.length ?? 0) > 1 && (
-              <Select value={workflow.name} onValueChange={setSelectedWorkflow}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>{workflowQuery.data?.workflows.map(item => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectContent>
-              </Select>
-            )}
-            {workflow.status === 'valid' && workflow.mermaid ? <MermaidRenderer code={workflow.mermaid} streaming={false} /> : (
-              <div className="flex items-center gap-2 text-sm text-destructive">
-                <span>{workflow.error ?? `Workflow is ${workflow.status}.`}</span>
-                {workflowEligible && <Button onClick={() => void generateSkillWorkflow(skill.name, profile).then(() => workflowQuery.refetch())} size="xs" variant="secondary">Regenerate</Button>}
-              </div>
-            )}
-          </>
-        ) : null}
-      </section>
     </>
   )
+}
+
+function WorkflowsTab({ profile, query }: { profile?: ProfileScope; query: string }) {
+  const [selected, setSelected] = useState<null | { skill: string; workflow: string }>(null)
+  const [generating, setGenerating] = useState(false)
+  const scope = profileScopeKey(profile)
+  const workflows = useQuery({ queryKey: ['workflows', scope], queryFn: () => getWorkflows(profile) })
+  const runBulk = async () => {
+    if (!window.confirm('Generate workflows for every missing or stale skill in this profile?')) return
+    setGenerating(true)
+    try {
+      const action = await generateWorkflows(profile)
+      for (;;) {
+        const state = await getActionStatus(action.name, 50, profile)
+        if (!state.running) break
+        await new Promise(resolve => setTimeout(resolve, 1000))
+      }
+      await workflows.refetch()
+    } finally { setGenerating(false) }
+  }
+  if (workflows.isLoading) return <PageLoader label="Loading workflows" />
+  if (workflows.isError) return <PanelEmpty action={<Button onClick={() => void workflows.refetch()} size="sm">Retry</Button>} icon="error" title="Workflows could not be loaded" />
+  const rows = (workflows.data?.workflows ?? []).filter(row => includesQuery(`${row.skill} ${row.workflow} ${row.state}`, normalize(query)))
+  const active = selected ?? (rows[0] ? { skill: rows[0].skill, workflow: rows[0].workflow } : null)
+  return <div className="flex h-full min-h-0 flex-col">
+    <div className="flex items-center gap-2 border-b border-(--ui-stroke-tertiary) px-3 py-2"><span className="text-xs text-(--ui-text-tertiary)">Existing workflows</span><Button className="ml-auto" disabled={generating} onClick={() => void runBulk()} size="xs" variant="secondary">{generating ? 'Generating…' : 'Generate missing and stale'}</Button></div>
+    {rows.length === 0 ? <PanelEmpty action={<Button disabled={generating} onClick={() => void runBulk()} size="sm">Generate missing and stale workflows</Button>} icon="graph" title="No workflows yet" /> : <MasterDetail split="wide">
+      <ListColumn>{rows.map(row => <CapRow active={active?.skill === row.skill && active.workflow === row.workflow} enabled key={`${row.skill}:${row.workflow}`} onSelect={() => setSelected({ skill: row.skill, workflow: row.workflow })} onToggle={() => {}} subtitle={`${row.source ?? 'unknown'} · ${row.state}`} title={`${row.skill} / ${row.workflow}`} toggleLabel="" />)}</ListColumn>
+      <DetailColumn>{active && <WorkflowVisualizer profile={profile} skill={active.skill} workflow={active.workflow} />}</DetailColumn>
+    </MasterDetail>}
+  </div>
 }
 
 function ToolsetDetail({

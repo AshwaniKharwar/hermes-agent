@@ -119,7 +119,9 @@ POSIX-only signals to search for in `scripts/`: `fcntl`, `termios`, `pty`, `os.f
 ## Prerequisites        — exact env vars, installs, API key sourcing
 ## How to Run           — canonical invocation through the `terminal` tool
 ## Quick Reference      — flat command list, no narration
+## Flow                 — NEW: diagram of the procedure
 ## Procedure            — numbered steps, each with a checkable completion criterion
+## Failure Handling     — NEW: generic rule + per-step failure table
 ## Pitfalls             — known limits, things that look broken but aren't
 ## Verification         — how to prove the skill worked
 ```

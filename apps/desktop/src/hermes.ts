@@ -128,5 +128,8 @@ export type {
   WebhookCreateResponse,
   WebhookEnableResponse,
   WebhookRoute,
+  WorkflowIndexResponse,
+  WorkflowInspection,
+  WorkflowStep,
   WebhooksResponse
 } from '@/types/hermes'

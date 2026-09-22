@@ -1088,6 +1088,33 @@ export interface WorkflowGenerationStatus {
   updated_at: string
 }
 
+export interface WorkflowStep {
+  kind: 'decision' | 'loop' | 'task'
+  instructions: string
+  branches?: Record<string, string>
+  input?: Record<string, unknown>
+  max_iterations?: number
+  next?: string
+  on_exhausted?: string
+  output_schema?: Record<string, unknown>
+  repeat?: string
+  route?: Record<string, unknown>
+  toolsets?: string[]
+}
+
+export interface WorkflowInspection {
+  state: 'invalid' | 'missing' | 'ready' | 'stale' | 'unavailable'
+  skill: string
+  workflow: string
+  source?: 'overlay' | 'packaged'
+  message?: string
+  graph?: { entry: string; steps: Record<string, WorkflowStep> }
+  mermaid?: string
+  node_ids?: Record<string, string>
+}
+
+export interface WorkflowIndexResponse { workflows: WorkflowInspection[] }
+
 /** One entry of the built-in optional-skills catalog (optional-skills/ in the
  *  repo) — official skills that ship with Hermes but install on demand. */
 export interface OfficialSkillInfo {

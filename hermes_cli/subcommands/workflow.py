@@ -10,10 +10,11 @@ from hermes_cli.subcommands._shared import add_json_flag
 def build_workflow_parser(subparsers, *, cmd_workflow: Callable) -> None:
     parser = subparsers.add_parser("workflow", help="Inspect, generate, and run skill workflows")
     sub = parser.add_subparsers(dest="workflow_action")
-    listing = sub.add_parser("list", help="List workflows for a skill")
+    listing = sub.add_parser("list", help="List workflows for a skill or profile")
     listing.add_argument("skill", nargs="?")
+    listing.add_argument("--all", action="store_true", help="List every existing workflow in the selected profile")
     show = sub.add_parser("show", help="Show a workflow")
-    show.add_argument("skill")
+    show.add_argument("skill", nargs="?", help="Skill name")
     show.add_argument("--name", default="default")
     show.add_argument("--format", choices=("text", "yaml", "json", "mermaid"), default="text")
     validate = sub.add_parser("validate", help="Validate a workflow")

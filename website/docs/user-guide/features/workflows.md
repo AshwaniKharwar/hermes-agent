@@ -21,9 +21,17 @@ profile-local overlay instead, so Hermes never changes the installed package. A 
 workflow is generated and validated before an explicit run; ordinary skill loading never generates
 or runs one.
 
+Workflows use `hermes/workflow@2` and are authored as flowcharts: every node is a `task`,
+`decision`, or `loop`. Tasks have one `next` target. Decisions have named `branches`, and their
+`output_schema.properties.transition.enum` must exactly name every branch. Loops additionally
+declare `repeat`, `max_iterations`, and `on_exhausted`, making retries and their stopping path
+visible and bounded. The renderer draws tasks as rectangles, decisions as diamonds, and loops as
+labelled loop nodes; undeclared cycles are rejected.
+
 Use `--step-model step=provider/model` and `--step-reasoning step=high` to compare model choices
 per step. Receipts are written under `~/.hermes/workflow-runs/` and include the selected route,
 structured input/output, transitions, and timing. They are intended as stable input to a later
 evaluation harness, not a scoring system by themselves.
 
-The Desktop app shows the same Mermaid graph in **Capabilities → Skills**. Viewing it is read-only.
+The Desktop app shows the same Mermaid flowchart and its source YAML in **Capabilities → Workflows**.
+Viewing it is read-only.

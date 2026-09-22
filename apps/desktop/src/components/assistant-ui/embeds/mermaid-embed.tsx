@@ -1,7 +1,7 @@
 'use client'
 
 import mermaid from 'mermaid'
-import { useEffect, useState } from 'react'
+import { type MouseEvent as ReactMouseEvent, useEffect, useState } from 'react'
 
 import { Zoomable } from '@/components/ui/zoomable'
 import { copySvgAsPng, normalizeSvgSize } from '@/lib/svg-image'
@@ -42,7 +42,13 @@ function SourcePreview({ code, muted }: { code: string; muted?: boolean }) {
 // Lazy chunk (pulls in mermaid). Renders ```mermaid fences as diagrams; shows
 // the source while the message streams (partial syntax throws) and falls back
 // to source on parse failure.
-export default function MermaidRenderer({ code, streaming }: RichFenceProps) {
+interface MermaidRendererProps extends RichFenceProps {
+  /** Optional safe mapping for application-owned diagrams. */
+  nodeIds?: Record<string, string>
+  onNodeSelect?: (stepId: string) => void
+}
+
+export default function MermaidRenderer({ code, streaming, nodeIds, onNodeSelect }: MermaidRendererProps) {
   const isDark = useIsDark()
   const [svg, setSvg] = useState('')
   const [failed, setFailed] = useState(false)
@@ -90,6 +96,15 @@ export default function MermaidRenderer({ code, streaming }: RichFenceProps) {
     return <SourcePreview code={code} muted />
   }
 
+  const selectNode = (event: ReactMouseEvent<HTMLDivElement>) => {
+    if (!nodeIds || !onNodeSelect) return
+    const id = (event.target as Element).closest('g.node')?.id || ''
+    // IDs are our n0/n1… nodes, emitted by agent.workflows; Mermaid owns the
+    // surrounding SVG markup and strict mode remains enabled.
+    const node = /^flowchart-(n\d+)-/.exec(id)?.[1]
+    if (node && nodeIds[node]) onNodeSelect(nodeIds[node])
+  }
+
   // Click to open the diagram full-screen with pan/zoom + copy-as-PNG. The
   // overlay keeps the diagram's natural width (capped to the viewport) so it
   // renders before any zoom; the inline version stays capped at 33dvh.
@@ -105,6 +120,7 @@ export default function MermaidRenderer({ code, streaming }: RichFenceProps) {
       }
     >
       <div
+        onClick={selectNode}
         className="overflow-hidden p-3 [&_svg]:mx-auto [&_svg]:h-auto [&_svg]:max-h-[33dvh] [&_svg]:max-w-full"
         dangerouslySetInnerHTML={{ __html: svg }}
       />

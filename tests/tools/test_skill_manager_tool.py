@@ -64,7 +64,7 @@ Step 1: Do the new thing.
 """
 
 VALID_WORKFLOW = """\
-schema: hermes/workflow@1
+schema: hermes/workflow@2
 id: default
 skill: test-skill
 entry: act
@@ -73,6 +73,7 @@ input_schema:
   type: object
 steps:
   act:
+    kind: task
     instructions: Do the skill procedure.
     input: {}
     output_schema:

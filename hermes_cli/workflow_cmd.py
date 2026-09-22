@@ -79,17 +79,18 @@ def _generate(skill: str, name: str) -> dict:
         fragments.append(f"\n\n--- {label} ---\n{text[:remaining]}")
         remaining -= len(text)
     contract = """Required shape (all keys are top-level):
-{"schema":"hermes/workflow@1","id":"default","skill":"SKILL_NAME","entry":"first_step","max_transitions":12,
+{"schema":"hermes/workflow@2","id":"default","skill":"SKILL_NAME","entry":"first_step","max_transitions":12,
  "input_schema":{"type":"object","properties":{"request":{"type":"string"}}},
- "steps":{"first_step":{"instructions":"...","input":{"request":"$input.request"},
+ "steps":{"first_step":{"kind":"task","instructions":"...","input":{"request":"$input.request"},
  "output_schema":{"type":"object","properties":{}},"next":"END"}},"output":{}}
-`steps` MUST be a non-empty object keyed by step ids. `entry` MUST equal one of those keys.
+Every step MUST have kind task, decision, or loop. Tasks use next. Decisions use branches and a transition enum that exactly matches those branch labels. Loops also use branches, repeat, max_iterations, and on_exhausted.
 """
     prompt = (
         "Compile this Hermes skill into a real executable workflow. Return ONLY a JSON object matching "
-        "hermes/workflow@1. Include concrete agent steps, JSON input/output schemas, and only safe $input.* "
-        "or $steps.<id>.output.* bindings. Never emit credentials. Do not invent a fallback step; represent "
-        "the actual procedure.\n\n" + contract + "\nSKILL PACKAGE:" + "".join(fragments))
+        "hermes/workflow@2. Model the actual flowchart: use decisions for every meaningful if/else, loops "
+        "for every retry cycle, and explicit exhausted paths. Include concrete agent steps, JSON input/output "
+        "schemas, and only safe $input.* or $steps.<id>.output.* bindings. Never emit credentials. Do not "
+        "invent a fallback step; represent the actual procedure.\n\n" + contract + "\nSKILL PACKAGE:" + "".join(fragments))
     messages = [
         {"role": "system", "content": "You compile safe, deterministic workflow graphs."},
         {"role": "user", "content": prompt},
@@ -100,16 +101,6 @@ def _generate(skill: str, name: str) -> dict:
         raw = _content(response)
         try:
             workflow = _json_object(raw)
-            # Models commonly follow JSON Schema's `$schema` convention and
-            # call the workflow id `name`; accept those harmless aliases only
-            # on generated output, while authored workflow files stay strict.
-            if workflow.get("$schema") == "hermes/workflow@1":
-                workflow["schema"] = workflow["$schema"]
-            workflow.setdefault("id", workflow.get("name", name))
-            workflow.setdefault("schema", "hermes/workflow@1")
-            workflow["skill"] = skill
-            if not workflow.get("entry") and isinstance(workflow.get("steps"), dict) and workflow["steps"]:
-                workflow["entry"] = next(iter(workflow["steps"]))
             validate_workflow(workflow, skill=skill)
             target = save_overlay(skill, workflow, name=name)
             return {"success": True, "path": str(target), "workflow": workflow,
@@ -171,6 +162,20 @@ def _summary(results: list[dict]) -> dict[str, int]:
         status = result["status"]
         counts[status] = counts.get(status, 0) + 1
     return counts
+
+
+def _list_all_workflows() -> list[dict]:
+    """Existing sidecars only; this inspection never generates a workflow."""
+    from tools.skills_tool import _find_all_skills
+
+    rows = []
+    for skill in _find_all_skills():
+        for item in workflow_sources(skill["name"]):
+            rows.append({
+                "skill": skill["name"], "name": item.path.stem, "source": item.source,
+                "stale": item.stale, "path": str(item.path),
+            })
+    return rows
 
 
 def _run(skill: str, name: str, inputs: Mapping[str, Any], model_specs: list[str], reasoning_specs: list[str]) -> dict:
@@ -236,8 +241,14 @@ def cmd_workflow(args) -> int:
     action = getattr(args, "workflow_action", None) or "list"
     try:
         if action == "list":
+            if args.all:
+                if args.skill:
+                    raise WorkflowError("Use either a skill name or --all, not both.")
+                rows = _list_all_workflows()
+                print(json.dumps(rows, indent=2) if rows else "No workflows found in this profile.")
+                return 0
             if not args.skill:
-                print("Pass a skill name. Use `hermes skills list` to see installed skills.")
+                print("Pass a skill name or use `hermes workflow list --all`.")
                 return 2
             rows = [{"name": item.path.stem, "source": item.source, "stale": item.stale, "path": str(item.path)}
                     for item in workflow_sources(args.skill)]
@@ -269,6 +280,9 @@ def cmd_workflow(args) -> int:
                 raise WorkflowError("Pass a skill name or --all.")
             print(json.dumps(_generate(args.skill, args.name), indent=2, ensure_ascii=False))
             return 0
+        if not args.skill:
+            print("Pass a skill name. Use `hermes workflow list <skill>` to inspect available workflows.")
+            return 2
         workflow, source = load_workflow(args.skill, args.name)
         if action == "validate":
             print(f"Valid workflow: {workflow['skill']}/{workflow['id']} ({source.source})")
