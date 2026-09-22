@@ -5,6 +5,7 @@ import type {
   SkillHubSearchResponse,
   SkillHubSourcesResponse,
   SkillInfo,
+  WorkflowGenerationStatus,
   StarmapGraph
 } from '@/types/hermes'
 import type { ActionResponse } from '@/types/hermes'
@@ -27,6 +28,34 @@ export function getSkillContent(
   return window.hermesDesktop.api<{ content: string; name: string; path: string }>({
     ...capabilityScoped(profile),
     path: `/api/skills/content?name=${encodeURIComponent(name)}`
+  })
+}
+
+export interface SkillWorkflowInfo {
+  error?: string
+  mermaid?: string
+  name: string
+  source: 'overlay' | 'packaged'
+  stale: boolean
+  status: 'invalid' | 'stale' | 'valid'
+  workflow?: Record<string, unknown>
+}
+
+export function getSkillWorkflows(
+  name: string,
+  profile?: ProfileScope
+): Promise<{ name: string; status: 'available' | 'missing'; workflows: SkillWorkflowInfo[]; workflow_eligible: boolean; workflow_eligibility: 'eligible' | 'external' | 'prebuilt' | 'user_owned'; workflow_generation?: WorkflowGenerationStatus }> {
+  return window.hermesDesktop.api({
+    ...capabilityScoped(profile),
+    path: `/api/skills/workflows?name=${encodeURIComponent(name)}`
+  })
+}
+
+export function generateSkillWorkflow(name: string, profile?: ProfileScope): Promise<{ success: boolean }> {
+  return window.hermesDesktop.api({
+    ...capabilityScoped(profile),
+    path: `/api/skills/workflows/generate?name=${encodeURIComponent(name)}`,
+    method: 'POST'
   })
 }
 

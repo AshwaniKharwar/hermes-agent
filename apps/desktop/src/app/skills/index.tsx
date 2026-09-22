@@ -18,6 +18,8 @@ import {
   getLearningNode,
   getProfiles,
   getSkillContent,
+  generateSkillWorkflow,
+  getSkillWorkflows,
   getSkills,
   getToolsets,
   getUsageAnalytics,
@@ -68,6 +70,7 @@ import { PluginActions, PluginsTab } from './plugins-tab'
 import { SkillCatalog } from './skill-catalog'
 import { $skillsSortDesc, $toolsetsSortDesc } from './store'
 import { UpdateSkillsButton } from './update-skills-button'
+import MermaidRenderer from '@/components/assistant-ui/embeds/mermaid-embed'
 
 // Skills Hub browsing lives inside the Skills tab. Legacy `?tab=hub`
 // links fall back to 'skills' via useRouteEnumParam.
@@ -1061,6 +1064,16 @@ function SkillDetail({
     queryFn: () => getSkillContent(skill.name, profile),
     staleTime: 60_000
   })
+  const workflowQuery = useQuery({
+    queryKey: ['skill-workflows', skill.name, profileScopeKey(profile)],
+    queryFn: () => getSkillWorkflows(skill.name, profile),
+    staleTime: 60_000
+  })
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null)
+  const workflow = workflowQuery.data?.workflows.find(item => item.name === selectedWorkflow)
+    ?? workflowQuery.data?.workflows[0]
+  const workflowEligible = workflowQuery.data?.workflow_eligible ?? skill.workflow_eligible === true
+  const workflowGeneration = workflowQuery.data?.workflow_generation ?? skill.workflow_generation
 
   const parsed = useMemo(
     () => (contentQuery.data ? parseFrontmatter(contentQuery.data.content) : null),
@@ -1113,6 +1126,31 @@ function SkillDetail({
           {parsed.body.trim() || t.skills.noDescription}
         </pre>
       ) : null}
+      <section className="grid gap-2">
+        <h3 className="text-sm font-medium">Workflow</h3>
+        {workflowQuery.isLoading ? <CountSkeleton /> : workflowQuery.data?.status === 'missing' ? (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <span>No executable workflow yet.</span>
+            {workflowGeneration?.status === 'failed' && <span className="text-destructive">{workflowGeneration.error ?? 'Generation failed.'}</span>}
+            {workflowEligible && <Button onClick={() => void generateSkillWorkflow(skill.name, profile).then(() => workflowQuery.refetch())} size="xs" variant="secondary">Generate</Button>}
+          </div>
+        ) : workflow ? (
+          <>
+            {(workflowQuery.data?.workflows.length ?? 0) > 1 && (
+              <Select value={workflow.name} onValueChange={setSelectedWorkflow}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{workflowQuery.data?.workflows.map(item => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+            {workflow.status === 'valid' && workflow.mermaid ? <MermaidRenderer code={workflow.mermaid} streaming={false} /> : (
+              <div className="flex items-center gap-2 text-sm text-destructive">
+                <span>{workflow.error ?? `Workflow is ${workflow.status}.`}</span>
+                {workflowEligible && <Button onClick={() => void generateSkillWorkflow(skill.name, profile).then(() => workflowQuery.refetch())} size="xs" variant="secondary">Regenerate</Button>}
+              </div>
+            )}
+          </>
+        ) : null}
+      </section>
     </>
   )
 }

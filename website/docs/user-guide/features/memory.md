@@ -228,6 +228,10 @@ The learning journey is a timeline view of everything Hermes has learned — sav
 
 A skill appears on the timeline as soon as it has a learning signal: it was created in this profile (a `/learn` result or a foreground `skill_manage` create), created by the background review, or used at least once. Bundled skills and hand-written skills that have never been used stay out of the timeline.
 
+For repeatable procedures, background skill review can save a validated executable workflow beside
+the skill. Those workflow graphs are intentionally separate from the Learning Journey: the journey
+shows what Hermes learned, while [Executable Skill Workflows](workflows.md) show and run the steps.
+
 Beyond viewing, the journey is also where you **prune and correct** what Hermes has learned:
 
 | Command | What it does |

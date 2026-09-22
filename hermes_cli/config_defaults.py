@@ -705,6 +705,8 @@ DEFAULT_CONFIG = {
         # are ignored. Compression: raise timeout for local models.
         "compression": _aux(120),
         "skills_hub": _aux(30),
+        # Explicit skill workflow compilation. Normal skill use never calls this.
+        "workflow_generation": _aux(180),
         "approval": _aux(30),   # classifier — a fast/cheap model is recommended
         # /review reviewer: a full subagent on the async delegation rail, credentials resolved like
         # delegation.provider pins. "auto" + "" = main agent's model. api_mode forces transport:

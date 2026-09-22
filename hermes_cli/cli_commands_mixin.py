@@ -1851,6 +1851,34 @@ class CLICommandsMixin:
         from hermes_cli.skills_hub import handle_skills_slash
         handle_skills_slash(cmd, ChatConsole())
 
+    def _handle_workflow_command(self, cmd: str):
+        """Run the same explicit workflow service as ``hermes workflow``.
+
+        Slash execution is intentionally explicit: it never alters the live
+        agent prompt or starts a workflow merely because a skill was loaded.
+        """
+        import json
+        import shlex
+        from types import SimpleNamespace
+        from hermes_cli.workflow_cmd import cmd_workflow
+
+        argv = shlex.split(cmd.strip().removeprefix("/workflow").strip())
+        if not argv:
+            return print("Usage: /workflow <list|show|validate|generate|run> <skill> [request]")
+        action, rest = argv[0], argv[1:]
+        if action == "run" and rest:
+            skill, request = rest[0], " ".join(rest[1:])
+            return cmd_workflow(SimpleNamespace(workflow_action="run", skill=skill, name="default",
+                                                input_json=json.dumps({"request": request}), step_model=[],
+                                                step_reasoning=[], json=False))
+        if action in {"show", "validate", "generate"} and rest:
+            return cmd_workflow(SimpleNamespace(workflow_action=action, skill=rest[0], name="default",
+                                                format="text", all=False, force=False, dry_run=False,
+                                                continue_on_error=False, json=False))
+        if action == "list":
+            return cmd_workflow(SimpleNamespace(workflow_action="list", skill=rest[0] if rest else None))
+        print("Usage: /workflow <list|show|validate|generate|run> <skill> [request]")
+
     def _handle_memory_command(self, cmd: str):
         """Handle /memory slash command — pending review + approval-gate toggle."""
         from hermes_cli.write_approval_commands import handle_pending_subcommand

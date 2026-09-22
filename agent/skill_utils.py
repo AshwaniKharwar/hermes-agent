@@ -28,7 +28,7 @@ EXCLUDED_SKILL_DIRS = frozenset((
 
 # Progressive-disclosure support dirs inside a skill package: loaded explicitly
 # via skill_view(skill, file_path=...), never scanned as standalone skills.
-SKILL_SUPPORT_DIRS = frozenset(("references", "templates", "assets", "scripts"))
+SKILL_SUPPORT_DIRS = frozenset(("references", "templates", "assets", "scripts", "workflows"))
 
 # Org mirrors live under skills/_org/<org_id>/ and are TOKEN-GATED: the sync
 # client writes the marker after verifying the token; no marker => no org skills

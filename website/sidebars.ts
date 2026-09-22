@@ -77,6 +77,7 @@ const sidebars: SidebarsConfig = {
             'user-guide/features/document-extraction',
             'user-guide/features/tool-search',
             'user-guide/features/skills',
+            'user-guide/features/workflows',
             'user-guide/features/lsp',
             'user-guide/features/curator',
             'user-guide/features/memory',

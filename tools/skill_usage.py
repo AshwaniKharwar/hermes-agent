@@ -260,6 +260,22 @@ def is_agent_created(skill_name: str) -> bool:
         _find_skill_dir(skill_name) is not None or _find_external_skill_dir(skill_name) is None)
 
 
+def workflow_eligibility(skill_name: str) -> str:
+    """Return the bulk-workflow policy for *skill_name* in the active profile.
+
+    Workflow generation accepts both background-review (``agent``) and
+    foreground learning (``learn``) skills: both were authored through Hermes'
+    skill-management write path. Bundled and Hub skills are installation
+    content; a skill outside the profile-local tree is externally owned.
+    """
+    if is_bundled(skill_name) or is_hub_installed(skill_name):
+        return "prebuilt"
+    if _find_skill_dir(skill_name) is None:
+        return "external"
+    return ("eligible" if load_usage().get(skill_name, {}).get("created_by") in {"agent", "learn"}
+            else "user_owned")
+
+
 def is_hub_installed(skill_name: str) -> bool:
     return skill_name in _read_hub_installed_names()
 
@@ -528,6 +544,26 @@ def record_installed(skill_name: str) -> None:
 def mark_agent_created(skill_name: str) -> None:
     """Opt a skill into curator management — the only thing that makes it eligible for automatic curation."""
     _set_field(skill_name, "created_by", "agent")
+
+
+def record_workflow_generation(skill_name: str, *, status: str, fingerprint: Optional[str] = None,
+                               path: Optional[str] = None, error: Optional[str] = None) -> None:
+    """Persist the latest workflow compilation result without touching skill ownership."""
+    if status not in {"generated", "regenerated", "already_valid", "failed"}:
+        raise ValueError(f"Unknown workflow generation status: {status}")
+
+    def _apply(rec: Dict[str, Any]) -> Dict[str, Any]:
+        entry = {"status": status, "updated_at": _now_iso()}
+        if fingerprint:
+            entry["source_fingerprint"] = fingerprint
+        if path:
+            entry["path"] = path
+        if error:
+            entry["error"] = error
+        rec["workflow_generation"] = entry
+        return rec
+
+    _mutate(skill_name, _apply)
 
 
 def set_state(skill_name: str, state: str) -> None:

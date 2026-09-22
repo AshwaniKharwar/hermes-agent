@@ -63,6 +63,24 @@ description: Updated description.
 Step 1: Do the new thing.
 """
 
+VALID_WORKFLOW = """\
+schema: hermes/workflow@1
+id: default
+skill: test-skill
+entry: act
+max_transitions: 1
+input_schema:
+  type: object
+steps:
+  act:
+    instructions: Do the skill procedure.
+    input: {}
+    output_schema:
+      type: object
+    next: END
+output: {}
+"""
+
 LONG_DESC_CONTENT = """\
 ---
 name: long-desc
@@ -180,7 +198,6 @@ class TestCreateSkill:
         assert "Invalid category '../escape'" in result["error"]
         assert not (tmp_path / "escape").exists()
 
-
     def test_edit_long_desc_still_allowed_with_preview(self, tmp_path):
         """Edit/patch paths stay permissive so existing over-limit skills
         remain maintainable — they warn via system_prompt_preview instead."""
@@ -192,6 +209,58 @@ class TestCreateSkill:
         assert "System prompt will show" in result["system_prompt_preview"]
         fm, _ = parse_frontmatter(LONG_DESC_CONTENT)
         assert extract_skill_description(fm) in result["system_prompt_preview"]
+
+
+class TestSynchronousWorkflowGeneration:
+    def _managed_home(self, tmp_path, monkeypatch):
+        home = tmp_path / ".hermes"
+        skills = home / "skills"
+        skills.mkdir(parents=True)
+        monkeypatch.setenv("HERMES_HOME", str(home))
+        monkeypatch.setattr("tools.skill_manager_tool.SKILLS_DIR", skills)
+        monkeypatch.setattr("agent.skill_utils.get_all_skills_dirs", lambda: [skills])
+        monkeypatch.setattr("tools.skill_manager_tool._apply_skill_write_gate", lambda *_args, **_kwargs: None)
+        monkeypatch.setattr("tools.skill_manager_tool._run_write_gate", lambda _staging: None)
+        return skills
+
+    def test_create_generates_before_skill_manage_returns(self, tmp_path, monkeypatch):
+        self._managed_home(tmp_path, monkeypatch)
+        calls = []
+        monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda name, _workflow: calls.append(name) or {
+            "path": f"/overlays/{name}.yaml", "fingerprint": "source-hash"})
+
+        result = json.loads(skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT))
+
+        assert calls == ["test-skill"]
+        assert result["workflow_generation"] == {
+            "status": "generated", "fingerprint": "source-hash", "path": "/overlays/test-skill.yaml"}
+        from tools.skill_usage import get_record
+        assert get_record("test-skill")["workflow_generation"]["status"] == "generated"
+
+    def test_batch_generates_once_for_its_final_skill_state(self, tmp_path, monkeypatch):
+        self._managed_home(tmp_path, monkeypatch)
+        calls = []
+        monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda name, _workflow: calls.append(name) or {
+            "path": f"/overlays/{name}.yaml", "fingerprint": "source-hash"})
+
+        result = json.loads(skill_manage(action="", name="", operations=[
+            {"action": "create", "name": "test-skill", "content": VALID_SKILL_CONTENT},
+            {"action": "write_file", "name": "test-skill", "file_path": "scripts/run.py", "file_content": "pass"},
+        ]))
+
+        assert calls == ["test-skill"]
+        assert result["workflow_generation"]["test-skill"]["status"] == "generated"
+
+    def test_explicit_default_workflow_is_retained_without_compilation(self, tmp_path, monkeypatch):
+        self._managed_home(tmp_path, monkeypatch)
+        monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda *_args: pytest.fail("must not compile"))
+
+        result = json.loads(skill_manage(action="", name="", operations=[
+            {"action": "create", "name": "test-skill", "content": VALID_SKILL_CONTENT},
+            {"action": "write_file", "name": "test-skill", "file_path": "workflows/default.yaml", "file_content": VALID_WORKFLOW},
+        ]))
+
+        assert result["workflow_generation"]["test-skill"]["status"] == "already_valid"
 
 
 class TestEditSkill:

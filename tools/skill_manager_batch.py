@@ -228,6 +228,7 @@ def _skill_manage_batch(operations, default_name: str = None, task_id: str = Non
         results = []
         rollback_failed = False
         token = _smt._skill_gate_bypass.set(True)
+        workflow_token = _smt._workflow_generation_deferred.set(True)
         try:
             for i, op in enumerate(operations):
                 raw = _smt._skill_manage_from({**op, "name": names[i], "operations": None},
@@ -253,15 +254,18 @@ def _skill_manage_batch(operations, default_name: str = None, task_id: str = Non
                                 "file_path": op.get("file_path"), "success": True})
         finally:
             _smt._skill_gate_bypass.reset(token)
+            _smt._workflow_generation_deferred.reset(workflow_token)
             if rollback_failed:
                 # Keep the snapshots so the operator can still recover by hand.
                 logger.warning("skill_manage batch rollback failed, snapshots kept at %s", snap_root)
             else:
                 shutil.rmtree(snap_root, ignore_errors=True)
+        workflow_generation = _smt._generate_workflows_for_batch(operations, names)
     # utf-8-sig + errors="replace": SKILL.md files are user-authored and sometimes carry a Notepad BOM or
     # stray non-UTF-8 bytes. Pinning UTF-8 with replacement keeps skill_view deterministic across platforms
     # — falling back to the machine locale (cp1252/GBK) would make the same skill render differently per
     # host (see PR #51701).
     return json.dumps(
-        {"success": True, "operations_applied": len(results), "results": results},
+        {"success": True, "operations_applied": len(results), "results": results,
+         **({"workflow_generation": workflow_generation} if workflow_generation else {})},
         ensure_ascii=False)

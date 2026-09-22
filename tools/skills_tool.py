@@ -371,11 +371,12 @@ _LINKED_FILE_SPECS = (
     ("references", ["*.md"], False, False),
     ("templates", ["*.md", "*.py", "*.yaml", "*.yml", "*.json", "*.tex", "*.sh"], True, False),
     ("assets", ["*"], True, True),
-    ("scripts", ["*.py", "*.sh", "*.bash", "*.js", "*.ts", "*.rb"], False, False))
+    ("scripts", ["*.py", "*.sh", "*.bash", "*.js", "*.ts", "*.rb"], False, False),
+    ("workflows", ["*.yaml", "*.yml"], False, False))
 
 
 def _skill_linked_files(skill_dir: Optional[Path]) -> dict:
-    """references/templates/assets/scripts of a directory skill (empty groups dropped)."""
+    """Progressive-disclosure support files of a directory skill (empty groups dropped)."""
     files: dict = {}
     for sub, globs, recursive, files_only in _LINKED_FILE_SPECS if skill_dir else ():
         base = skill_dir / sub

@@ -345,7 +345,8 @@ async def get_skills(profile: Optional[str] = None):
     from tools.skills_tool import _find_all_skills
     from hermes_cli.skills_config import get_disabled_skills
     from tools.skill_usage import (
-        _read_bundled_manifest_names, _read_hub_installed_names, activity_count, load_usage)
+        _read_bundled_manifest_names, _read_hub_installed_names, activity_count, load_usage,
+        workflow_eligibility)
 
     def _run():
         with _profile_scope(profile):
@@ -359,13 +360,16 @@ async def get_skills(profile: Optional[str] = None):
             # the user may edit/delete from the UI.
             bundled_names = _read_bundled_manifest_names()
             hub_names = _read_hub_installed_names()
-        for s in skills:
-            s["enabled"] = s["name"] not in disabled
-            s["usage"] = activity_count(usage.get(s["name"], {}))
-            s["provenance"] = (
-                "hub" if s["name"] in hub_names
-                else "bundled" if s["name"] in bundled_names
-                else "agent")
+            for s in skills:
+                s["enabled"] = s["name"] not in disabled
+                s["usage"] = activity_count(usage.get(s["name"], {}))
+                s["workflow_generation"] = usage.get(s["name"], {}).get("workflow_generation")
+                s["provenance"] = (
+                    "hub" if s["name"] in hub_names
+                    else "bundled" if s["name"] in bundled_names
+                    else "agent")
+                s["workflow_eligibility"] = workflow_eligibility(s["name"])
+                s["workflow_eligible"] = s["workflow_eligibility"] == "eligible"
         return skills
 
     return await asyncio.to_thread(_run)
@@ -408,6 +412,54 @@ async def get_skill_content(name: str, profile: Optional[str] = None):
         return {"name": name, "content": content, "path": str(skill_md)}
 
     return await scoped_to_thread(profile, _read)
+
+
+@router.get("/api/skills/workflows")
+async def get_skill_workflows(name: str, profile: Optional[str] = None):
+    """Validated workflow metadata for the selected skill; never generates."""
+    from agent.workflows import WorkflowError
+
+    def _read():
+        from agent.workflows import WorkflowError, _load_yaml, render_mermaid, validate_workflow, workflow_sources
+        from tools.skill_usage import load_usage
+        rows = []
+        for source in workflow_sources(name):
+            row = {"name": source.path.stem, "source": source.source, "stale": source.stale, "path": str(source.path)}
+            try:
+                workflow = validate_workflow(_load_yaml(source.path), skill=name)
+                row.update({"status": "stale" if source.stale else "valid", "workflow": workflow,
+                            "mermaid": render_mermaid(workflow)})
+            except WorkflowError as exc:
+                row.update({"status": "invalid", "error": str(exc)})
+            rows.append(row)
+        from tools.skill_usage import workflow_eligibility
+        eligibility = workflow_eligibility(name)
+        return {"name": name, "workflows": rows, "status": "available" if rows else "missing",
+                "workflow_eligibility": eligibility, "workflow_eligible": eligibility == "eligible",
+                "workflow_generation": load_usage().get(name, {}).get("workflow_generation")}
+
+    try:
+        return await scoped_to_thread(profile, _read)
+    except WorkflowError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/skills/workflows/generate")
+async def generate_skill_workflow(name: str, profile: Optional[str] = None):
+    """Explicitly compile a missing/stale workflow; never called by reads."""
+    from agent.workflows import WorkflowError
+
+    def _generate():
+        from hermes_cli.workflow_cmd import _generate
+        from tools.skill_usage import workflow_eligibility
+        if workflow_eligibility(name) != "eligible":
+            raise WorkflowError("Workflow generation from the desktop is limited to Hermes-created skills. Use the explicit CLI command to generate this skill.")
+        return _generate(name, "default")
+
+    try:
+        return await scoped_to_thread(profile, _generate)
+    except WorkflowError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/api/skills")

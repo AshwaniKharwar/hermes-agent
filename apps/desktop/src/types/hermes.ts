@@ -1074,6 +1074,18 @@ export interface SkillInfo {
   usage?: number
   /** 'agent' = learned/local (editable), 'bundled' = ships with Hermes, 'hub' = installed. */
   provenance?: 'agent' | 'bundled' | 'hub'
+  /** Whether Hermes created this skill and it may generate workflows automatically. */
+  workflow_eligible?: boolean
+  workflow_eligibility?: 'eligible' | 'external' | 'prebuilt' | 'user_owned'
+  workflow_generation?: WorkflowGenerationStatus
+}
+
+export interface WorkflowGenerationStatus {
+  error?: string
+  path?: string
+  source_fingerprint?: string
+  status: 'already_valid' | 'failed' | 'generated' | 'regenerated'
+  updated_at: string
 }
 
 /** One entry of the built-in optional-skills catalog (optional-skills/ in the

@@ -67,6 +67,39 @@ def test_empty_usage_returns_empty_dict(skills_home):
     assert load_usage() == {}
 
 
+def test_workflow_eligibility_requires_hermes_creation_provenance(skills_home):
+    """Workflow bulk generation must not spend model calls on installed/local user skills."""
+    from tools.skill_usage import record_created, workflow_eligibility
+
+    _write_skill(skills_home / "skills", "background")
+    _write_skill(skills_home / "skills", "learned")
+    _write_skill(skills_home / "skills", "bundled")
+    record_created("background", agent_created=True)
+    record_created("learned", agent_created=False)
+    (skills_home / "skills" / ".bundled_manifest").write_text("bundled:hash\n", encoding="utf-8")
+
+    assert workflow_eligibility("background") == "eligible"
+    assert workflow_eligibility("learned") == "eligible"
+    assert workflow_eligibility("bundled") == "prebuilt"
+    assert workflow_eligibility("not-local") == "external"
+
+
+def test_workflow_eligibility_stays_with_the_active_profile(skills_home, monkeypatch, tmp_path):
+    """A → B → A must not leak a background-created marker across profiles."""
+    from tools.skill_usage import record_created, workflow_eligibility
+
+    _write_skill(skills_home / "skills", "shared-name")
+    record_created("shared-name", agent_created=True)
+    other_home = tmp_path / "other-profile"
+    _write_skill(other_home / "skills", "shared-name")
+
+    assert workflow_eligibility("shared-name") == "eligible"
+    monkeypatch.setenv("HERMES_HOME", str(other_home))
+    assert workflow_eligibility("shared-name") == "user_owned"
+    monkeypatch.setenv("HERMES_HOME", str(skills_home))
+    assert workflow_eligibility("shared-name") == "eligible"
+
+
 def test_save_and_load_roundtrip(skills_home):
     from tools.skill_usage import load_usage, save_usage
     data = {"skill-a": {"use_count": 3, "state": "active"}}

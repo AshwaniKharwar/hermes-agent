@@ -4,7 +4,7 @@
 Skills are the agent's procedural memory (narrow "how to do X"; MEMORY.md/USER.md are
 broad, declarative). New skills land in ~/.hermes/skills/ (or ``skills.create_dir``);
 existing skills (bundled, hub, user) are modified in place. Layout:
-``<skills>/[category/]<skill>/SKILL.md`` + optional ``references/ templates/ scripts/ assets/``.
+``<skills>/[category/]<skill>/SKILL.md`` + optional ``references/ templates/ scripts/ assets/ workflows/``.
 """
 
 import contextvars as _ctxvars
@@ -111,7 +111,7 @@ MAX_DESCRIPTION_LENGTH = 1024
 MAX_SKILL_CONTENT_CHARS = 100_000   # ~36k tokens at 2.75 chars/token
 MAX_SKILL_FILE_BYTES = 1_048_576    # 1 MiB per supporting file
 VALID_NAME_RE = re.compile(r'^[a-z0-9][a-z0-9._-]*$')  # filesystem-safe, URL-friendly
-ALLOWED_SUBDIRS = {"references", "templates", "scripts", "assets"}  # for write_file/remove_file
+ALLOWED_SUBDIRS = {"references", "templates", "scripts", "assets", "workflows"}  # for write_file/remove_file
 _FRONTMATTER_END_RE = re.compile(r'\n---\s*\n')
 _NAME_RULE = "Use lowercase letters, numbers, hyphens, dots, and underscores."
 
@@ -557,6 +557,12 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
                     f"bytes / 1 MiB). Consider splitting into smaller files.")
     if err := _validate_content_size(file_content, label=file_path):
         return _err(err)
+    if file_path.startswith("workflows/"):
+        try:
+            from agent.workflows import validate_workflow
+            validate_workflow(yaml.safe_load(file_content) or {}, skill=name)
+        except Exception as exc:
+            return _err(f"Invalid workflow YAML: {exc}")
     skill_dir, guard = _locate_for_write(name, "write_file", " Create it first with action='create'.")
     if guard:
         return guard
@@ -598,6 +604,75 @@ def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
 # Set while replaying an approved staged skill write so skill_manage() does not re-gate it.
 _skill_gate_bypass: "_ctxvars.ContextVar[bool]" = _ctxvars.ContextVar(
     "skill_gate_bypass", default=False)
+_workflow_generation_deferred: "_ctxvars.ContextVar[bool]" = _ctxvars.ContextVar(
+    "workflow_generation_deferred", default=False)
+
+
+def _workflow_refresh_required(action: str, file_path: Optional[str]) -> bool:
+    """Whether a skill mutation changes the procedure a generated graph represents."""
+    if action in {"create", "edit"}:
+        return True
+    if action == "patch":
+        return not file_path or file_path.startswith(("references/", "templates/", "scripts/"))
+    return action in {"write_file", "remove_file"} and bool(file_path) and file_path.startswith(
+        ("references/", "templates/", "scripts/"))
+
+
+def _redact_workflow_error(exc: Exception) -> str:
+    from agent.redact import redact_sensitive_text
+    return (redact_sensitive_text(str(exc), force=True, redact_url_credentials=True) or "Workflow generation failed.")[:1000]
+
+
+def _generate_workflow_for_mutation(name: str, *, action: str, file_path: Optional[str] = None,
+                                    explicit_workflow: bool = False) -> Optional[Dict[str, Any]]:
+    """Compile one final skill state and persist a safe status for the caller/UI."""
+    from tools.skill_usage import workflow_eligibility
+    if workflow_eligibility(name) != "eligible":
+        return None
+    if explicit_workflow:
+        from agent.workflows import workflow_source_fingerprint
+        from tools.skill_usage import record_workflow_generation
+        fingerprint = workflow_source_fingerprint(name)
+        record_workflow_generation(name, status="already_valid", fingerprint=fingerprint)
+        return {"status": "already_valid", "fingerprint": fingerprint}
+    if not _workflow_refresh_required(action, file_path):
+        return None
+    from tools.skill_usage import record_workflow_generation
+    try:
+        from agent.workflows import workflow_sources
+        from hermes_cli.workflow_cmd import _generate
+        prior = any(source.path.stem == "default" for source in workflow_sources(name))
+        generated = _generate(name, "default")
+        status = "regenerated" if prior else "generated"
+        record_workflow_generation(name, status=status, fingerprint=generated["fingerprint"], path=generated["path"])
+        return {"status": status, "fingerprint": generated["fingerprint"], "path": generated["path"]}
+    except Exception as exc:  # Skill content is already valid and must remain usable after compiler failure.
+        error = _redact_workflow_error(exc)
+        with suppress(Exception):
+            record_workflow_generation(name, status="failed", error=error)
+        return {"status": "failed", "error": error}
+
+
+def _generate_workflows_for_batch(operations: List[Dict[str, Any]], names: List[str]) -> Dict[str, Dict[str, Any]]:
+    """Compile each eligible final batch state once; explicit default graphs are retained."""
+    targets: Dict[str, Dict[str, bool]] = {}
+    for operation, name in zip(operations, names):
+        target = targets.setdefault(name, {"refresh": False, "explicit_workflow": False})
+        action, file_path = operation["action"], operation.get("file_path")
+        target["refresh"] = target["refresh"] or _workflow_refresh_required(action, file_path)
+        target["explicit_workflow"] = target["explicit_workflow"] or (
+            action == "write_file" and file_path == "workflows/default.yaml")
+    results = {}
+    for name, target in targets.items():
+        if target["explicit_workflow"]:
+            outcome = _generate_workflow_for_mutation(name, action="write_file", explicit_workflow=True)
+        elif target["refresh"]:
+            outcome = _generate_workflow_for_mutation(name, action="edit")
+        else:
+            outcome = None
+        if outcome is not None:
+            results[name] = outcome
+    return results
 
 
 def _run_write_gate(build_staging):
@@ -744,6 +819,10 @@ def _record_success(action, name, result, *, file_path, absorbed_into, task_id,
             bump_patch(name, action=action, task_id=task_id, session_id=session_id)
         elif action == "delete" and not result.get("_archived"):
             forget(name)
+    if not _workflow_generation_deferred.get():
+        outcome = _generate_workflow_for_mutation(name, action=action, file_path=file_path)
+        if outcome is not None:
+            result["workflow_generation"] = outcome
     # Only AFTER the write gate passed (staged writes returned early): never push un-reviewed content.
     with suppress(Exception):
         _maybe_debounced_sync_push(name)
@@ -837,7 +916,7 @@ _FILE_PATH = {
     "type": "string",
     "description": (
         "Path RELATIVE to the skill's own directory, e.g. 'references/api.md' — no leading "
-        "slash, never absolute; first segment references/, templates/, scripts/, or assets/."
+        "slash, never absolute; first segment references/, templates/, scripts/, assets/, or workflows/."
     ),
 }  # stated once (write_file); patch/remove_file point at it
 
