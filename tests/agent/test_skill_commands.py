@@ -10,9 +10,22 @@ import tools.skills_tool as skills_tool_module
 from agent.skill_commands import (
     build_preloaded_skills_prompt,
     build_skill_invocation_message,
+    parse_single_skill_invocation,
     resolve_skill_command_key,
     scan_skill_commands,
 )
+
+
+def test_single_skill_parser_excludes_ordinary_messages_and_bundles():
+    single = ('[IMPORTANT: The user has invoked the "research" skill. '
+              'The full skill content is loaded below.]\n[Invocation source: explicit slash skill]\n\nbody\n'
+              'The user has provided the following instruction alongside the skill invocation: investigate')
+    bundle = '[IMPORTANT: The user has invoked the "/a /b" skill bundle, containing 2 skills.]'
+
+    assert parse_single_skill_invocation(single) == ("research", "investigate")
+    assert parse_single_skill_invocation(single.replace("\n[Invocation source: explicit slash skill]", "")) is None
+    assert parse_single_skill_invocation(bundle) is None
+    assert parse_single_skill_invocation("use research naturally") is None
 
 
 def _make_skill(

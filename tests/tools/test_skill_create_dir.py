@@ -44,7 +44,8 @@ def _skill_md(name: str) -> str:
     return (
         f"---\nname: {name}\n"
         f"description: Use when testing create dir routing. One-line behavior.\n"
-        f"---\n\n# {name}\n\nBody.\n"
+        f"---\n\n# {name}\n\nBody.\n\n## Workflow contract\n```yaml\n"
+        "entry: act\nsteps:\n  act: {kind: task, next: END, terminal_outcome: success}\n```\n"
     )
 
 

@@ -22,6 +22,13 @@ description: test skill
 # My Skill
 
 Original body.
+
+## Workflow contract
+```yaml
+entry: act
+steps:
+  act: {kind: task, next: END, terminal_outcome: success}
+```
 """
 
 

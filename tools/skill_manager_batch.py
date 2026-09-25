@@ -102,6 +102,13 @@ def _validate_batch_ops(operations, default_name, tool_error):
         # op[1] would first apply op[0] and then roll the whole batch back.
         if (shape_err := _op_shape_error(act, op)) is not None:
             return fail(i, f" ({act} on '{nm}'): {shape_err}")
+        if act == "create":
+            from agent.workflows import WorkflowError, parse_workflow_contract
+            try:
+                parse_workflow_contract(op["content"], require=True)
+            except WorkflowError as exc:
+                return fail(i, f" (create on '{nm}'): invalid workflow contract: {exc} "
+                           "Add or correct ## Workflow contract and retry create.")
         names.append(nm)
         if act == "create" and nm in names[:-1]:
             return fail(i, f": create for '{nm}' must precede that skill's other ops.")

@@ -15,6 +15,9 @@ from tools.skill_manager_tool import (
     skill_manage,
 )
 
+WORKFLOW_CONTRACT = ("\n## Workflow contract\n```yaml\nentry: act\nsteps:\n"
+                     "  act: {kind: task, next: END, terminal_outcome: success}\n```\n")
+
 
 @pytest.fixture(autouse=True)
 def isolate_skills(tmp_path, monkeypatch):
@@ -35,7 +38,8 @@ def _make_skill_content(body_chars: int) -> str:
         "description: A test skill\n"
         "---\n"
     )
-    body = "# Test Skill\n\n" + ("x" * max(0, body_chars - 15))
+    prefix = "# Test Skill\n\n"
+    body = prefix + ("x" * max(0, body_chars - len(frontmatter) - len(prefix) - len(WORKFLOW_CONTRACT))) + WORKFLOW_CONTRACT
     return frontmatter + body
 
 
@@ -63,8 +67,8 @@ class TestCreateSkillSizeLimit:
     def test_create_at_limit(self, isolate_skills):
         # Content at exactly the limit should succeed
         frontmatter = "---\nname: edge-skill\ndescription: Edge case\n---\n# Edge\n\n"
-        body_budget = MAX_SKILL_CONTENT_CHARS - len(frontmatter)
-        content = frontmatter + ("x" * body_budget)
+        body_budget = MAX_SKILL_CONTENT_CHARS - len(frontmatter) - len(WORKFLOW_CONTRACT)
+        content = frontmatter + ("x" * body_budget) + WORKFLOW_CONTRACT
         assert len(content) == MAX_SKILL_CONTENT_CHARS
         result = json.loads(skill_manage(action="create", name="edge-skill", content=content))
         assert result["success"] is True

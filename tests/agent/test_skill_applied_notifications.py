@@ -12,7 +12,9 @@ def _messages(args, data):
 def test_applied_skill_operations_notify_with_names(tmp_path, monkeypatch):
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
     name = "notify-contract"
-    content = f"---\nname: {name}\ndescription: Use when checking notices. Verify applied writes.\n---\nRead the sample before editing.\n"
+    content = (f"---\nname: {name}\ndescription: Use when checking notices. Verify applied writes.\n---\n"
+               "Read the sample before editing.\n\n## Workflow contract\n```yaml\nentry: act\nsteps:\n"
+               "  act: {kind: task, next: END, terminal_outcome: success}\n```\n")
     operations = [{"name": name, "action": "create", "content": content},
                   {"name": name, "action": "patch", "old_string": "sample", "new_string": "example"},
                   {"name": name, "action": "write_file", "file_path": "references/a.md", "file_content": "Check the example."},

@@ -1508,6 +1508,9 @@ def _run_conversation_turn(
         max_compression_attempts=getattr(agent, "max_compression_attempts", 3),
         **{f.name: getattr(_ctx, f.name.lstrip("_")) for f in fields(_LoopState) if f.name in _CTX_FIELDS},
     )
+    from agent.workflow_turn import prefer_skill_workflow
+    if prefer_skill_workflow(agent, s) is not None:
+        return _finalize_loop_state(agent, s)
     # Opt-in runtime: api_mode == codex_app_server hands the whole turn to the codex
     # app-server subprocess (see agent/transports/codex_app_server_session.py).
     if agent.api_mode == "codex_app_server":
@@ -1564,7 +1567,11 @@ def _run_conversation_turn(
             if _run_phase(handle_outer_loop_error, agent, s, e=e).action == "break":
                 break
 
-    # Post-loop finalization lives in agent/turn_finalizer.finalize_turn.
+    return _finalize_loop_state(agent, s)
+
+
+def _finalize_loop_state(agent, s: _LoopState) -> Dict[str, Any]:
+    """Send model and workflow exits through the same durable turn finalizer."""
     result = finalize_turn(agent, **{
         name: getattr(s, name)
         for name in inspect.signature(finalize_turn).parameters if name != "agent"

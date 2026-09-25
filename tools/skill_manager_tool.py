@@ -365,6 +365,14 @@ def _guarded_write(name: str, skill_dir: Path, target: Path, action: str, label:
         if read_guard := _background_review_read_before_write_guard(name, target, action, label):
             return read_guard
         original = target.read_text(encoding="utf-8")
+    if target.name == "SKILL.md":
+        from agent.workflows import WorkflowError, parse_workflow_contract
+        from tools.skill_usage import workflow_eligibility
+        if workflow_eligibility(name) == "eligible" or (original and "## Workflow contract" in original):
+            try:
+                parse_workflow_contract(content, require=True)
+            except WorkflowError as exc:
+                return _err(f"SKILL.md workflow contract is invalid: {exc} Fix the contract and retry.")
     from hermes_constants import mkdir_under_hermes_home
     mkdir_under_hermes_home(target.parent)
     atomic_write_text(target, content, preserve_mode=True, create_mode=0o644)
@@ -559,8 +567,16 @@ def _write_file(name: str, file_path: str, file_content: str) -> Dict[str, Any]:
         return _err(err)
     if file_path.startswith("workflows/"):
         try:
-            from agent.workflows import validate_workflow
-            validate_workflow(yaml.safe_load(file_content) or {}, skill=name)
+            from agent.workflows import (validate_workflow, validate_workflow_contract,
+                                         workflow_contract, workflow_source_fingerprint)
+            graph = validate_workflow(yaml.safe_load(file_content) or {}, skill=name)
+            found = _find_skill(name)
+            if found:
+                skill_path = Path(found["path"])
+                validate_workflow_contract(graph, skill_path, require=True)
+                if workflow_contract(skill_path) is not None:
+                    graph["skill_fingerprint"] = workflow_source_fingerprint(name)
+                    file_content = yaml.safe_dump(graph, allow_unicode=True, sort_keys=False)
         except Exception as exc:
             return _err(f"Invalid workflow YAML: {exc}")
     skill_dir, guard = _locate_for_write(name, "write_file", " Create it first with action='create'.")
@@ -840,6 +856,13 @@ def skill_manage(
             operations, default_name=name or None, task_id=task_id, session_id=session_id)
     if (preflight := _background_review_preflight(action, name)) is not None:
         return json.dumps(preflight, ensure_ascii=False)
+    if action == "create" and content and _validate_name(name) is None:
+        from agent.workflows import WorkflowError, parse_workflow_contract
+        try:
+            parse_workflow_contract(content, require=True)
+        except WorkflowError as exc:
+            return json.dumps(_err(f"Skill creation needs a valid workflow contract: {exc} "
+                                   "Add or correct ## Workflow contract and retry create."), ensure_ascii=False)
     # Approval gate: skills are too large to review inline, so they always stage regardless
     # of origin; bypassed when replaying an approved staged write.
     args = dict(content=content, category=category, file_path=file_path, file_content=file_content,
@@ -897,6 +920,11 @@ def _skill_manage_description(create_dir: str) -> str:
         "when <trigger>. <one-line behavior>.' Write lessons, not logs: "
         "imperative rule + why, no PR numbers/dates/incident narration, one "
         "rule per lesson, references/ named by topic (extend before adding). "
+        "Every created skill needs a ## Workflow contract fenced YAML block "
+        "with entry and steps (kinds, edges, retry limits, error paths); "
+        "terminal tasks need terminal_outcome: success, partial, or blocked. "
+        "Count or existence goals need a goal_gate with target and measured bindings, "
+        "and a partial terminal before delivery. "
         "skill_view() shows format conventions."
     )
 

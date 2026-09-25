@@ -8,6 +8,7 @@ seam so ``monkeypatch.setattr(<owning module>, ...)`` keeps working.
 """
 
 import asyncio
+from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
@@ -420,15 +421,20 @@ async def get_skill_workflows(name: str, profile: Optional[str] = None):
     from agent.workflows import WorkflowError
 
     def _read():
-        from agent.workflows import WorkflowError, _load_yaml, render_mermaid, validate_workflow, workflow_sources
+        from agent.workflows import (WorkflowError, _load_yaml, render_mermaid, validate_workflow,
+                                     validate_workflow_contract, workflow_sources)
+        from tools.skill_manager_tool import _find_skill
         from tools.skill_usage import load_usage
         rows = []
         for source in workflow_sources(name):
-            row = {"name": source.path.stem, "source": source.source, "stale": source.stale, "path": str(source.path)}
+            row = {"name": source.path.stem, "source": source.source, "stale": source.stale,
+                   "activation": source.activation, "path": str(source.path)}
             try:
                 row["yaml"] = source.path.read_text(encoding="utf-8")
                 workflow = validate_workflow(_load_yaml(source.path), skill=name)
-                row.update({"status": "stale" if source.stale else "valid", "workflow": workflow,
+                validate_workflow_contract(workflow, Path(_find_skill(name)["path"]))
+                status = "candidate" if source.activation == "candidate" else ("stale" if source.stale else "valid")
+                row.update({"status": status, "workflow": workflow,
                             "mermaid": render_mermaid(workflow)})
             except WorkflowError as exc:
                 row.update({"status": "invalid", "error": str(exc)})
@@ -452,14 +458,49 @@ async def generate_skill_workflow(name: str, profile: Optional[str] = None):
 
     def _generate():
         from hermes_cli.workflow_cmd import _generate
-        from tools.skill_usage import workflow_eligibility
-        if workflow_eligibility(name) != "eligible":
-            raise WorkflowError("Workflow generation from the desktop is limited to Hermes-created skills. Use the explicit CLI command to generate this skill.")
         return _generate(name, "default")
 
     try:
         return await scoped_to_thread(profile, _generate)
     except WorkflowError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/api/skills/workflows/activate")
+async def activate_skill_workflow(name: str, workflow: str = "default", profile: Optional[str] = None):
+    def _activate():
+        from agent.workflows import activate_workflow
+        return {"success": True, "path": str(activate_workflow(name, workflow))}
+    try:
+        return await scoped_to_thread(profile, _activate)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/api/workflows/runs")
+async def list_workflow_run_receipts(skill: Optional[str] = None, limit: int = 50,
+                                     profile: Optional[str] = None):
+    from agent.workflow_receipts import list_workflow_runs
+    return {"runs": await scoped_to_thread(profile, lambda: list_workflow_runs(skill, limit=limit))}
+
+
+@router.get("/api/workflows/runs/{run_id}")
+async def inspect_workflow_run_receipt(run_id: str, profile: Optional[str] = None):
+    from agent.workflow_receipts import inspect_workflow_run
+    try:
+        return await scoped_to_thread(profile, lambda: inspect_workflow_run(run_id))
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.post("/api/workflows/runs/{run_id}/resume")
+async def resume_workflow_run_receipt(run_id: str, decision: str, profile: Optional[str] = None):
+    if decision not in {"accept", "continue", "stop", "retry"}:
+        raise HTTPException(status_code=400, detail="Invalid workflow decision.")
+    from agent.workflow_runner import resume_workflow
+    try:
+        return await scoped_to_thread(profile, lambda: resume_workflow(run_id, decision))
+    except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 

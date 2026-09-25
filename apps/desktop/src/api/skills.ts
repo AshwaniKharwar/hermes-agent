@@ -33,12 +33,13 @@ export function getSkillContent(
 }
 
 export interface SkillWorkflowInfo {
+  activation: 'active' | 'candidate'
   error?: string
   mermaid?: string
   name: string
   source: 'overlay' | 'packaged'
   stale: boolean
-  status: 'invalid' | 'stale' | 'valid'
+  status: 'candidate' | 'invalid' | 'stale' | 'valid'
   workflow?: Record<string, unknown>
   /** Original workflow file contents, not the validated graph representation. */
   yaml?: string
@@ -60,6 +61,35 @@ export function generateSkillWorkflow(name: string, profile?: ProfileScope): Pro
     path: `/api/skills/workflows/generate?name=${encodeURIComponent(name)}`,
     method: 'POST'
   })
+}
+
+export interface WorkflowRunSummary {
+  control_flow: Array<{ state: 'cancelled' | 'completed' | 'exhausted' | 'failed' | 'running'; step: string; transition?: string }>
+  execution_mode: 'skill_fallback' | 'workflow'
+  fallback_reason?: string
+  generation_job_id?: null | string
+  run_id: string
+  outcome?: 'success' | 'partial' | 'blocked'
+  pending_action?: { code: string; choices: Record<string, string>; outcome: 'partial' | 'blocked' } | null
+  skill: string
+  started_at: string
+  status: 'cancelled' | 'conformant' | 'failed' | 'incomplete' | 'paused' | 'unverifiable'
+}
+
+export function resumeWorkflowRun(runId: string, decision: string, profile?: ProfileScope): Promise<WorkflowRunSummary> {
+  return window.hermesDesktop.api({ ...capabilityScoped(profile),
+    path: `/api/workflows/runs/${encodeURIComponent(runId)}/resume?decision=${encodeURIComponent(decision)}`,
+    method: 'POST' })
+}
+
+export function getWorkflowRuns(skill: string, profile?: ProfileScope): Promise<{ runs: WorkflowRunSummary[] }> {
+  return window.hermesDesktop.api({ ...capabilityScoped(profile), path: `/api/workflows/runs?skill=${encodeURIComponent(skill)}&limit=1` })
+}
+
+export function activateSkillWorkflow(name: string, workflow = 'default', profile?: ProfileScope): Promise<{ success: boolean }> {
+  return window.hermesDesktop.api({ ...capabilityScoped(profile),
+    path: `/api/skills/workflows/activate?name=${encodeURIComponent(name)}&workflow=${encodeURIComponent(workflow)}`,
+    method: 'POST' })
 }
 
 /** Existing packaged/overlay workflows across the selected profile. */

@@ -547,9 +547,10 @@ def mark_agent_created(skill_name: str) -> None:
 
 
 def record_workflow_generation(skill_name: str, *, status: str, fingerprint: Optional[str] = None,
-                               path: Optional[str] = None, error: Optional[str] = None) -> None:
+                               path: Optional[str] = None, error: Optional[str] = None,
+                               job_id: Optional[str] = None, activation: Optional[str] = None) -> None:
     """Persist the latest workflow compilation result without touching skill ownership."""
-    if status not in {"generated", "regenerated", "already_valid", "failed"}:
+    if status not in {"queued", "generating", "generated", "regenerated", "candidate", "already_valid", "failed"}:
         raise ValueError(f"Unknown workflow generation status: {status}")
 
     def _apply(rec: Dict[str, Any]) -> Dict[str, Any]:
@@ -560,6 +561,10 @@ def record_workflow_generation(skill_name: str, *, status: str, fingerprint: Opt
             entry["path"] = path
         if error:
             entry["error"] = error
+        if job_id:
+            entry["job_id"] = job_id
+        if activation:
+            entry["activation"] = activation
         rec["workflow_generation"] = entry
         return rec
 

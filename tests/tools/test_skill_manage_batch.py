@@ -15,7 +15,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 SK = (
     "---\nname: {n}\ndescription: Use when probing batch ops. Behavior.\n---\n"
-    "# Probe\nStep 1.\n"
+    "# Probe\nStep 1.\n\n## Workflow contract\n```yaml\n"
+    "entry: act\nsteps:\n  act: {{kind: task, next: END, terminal_outcome: success}}\n```\n"
 )
 
 

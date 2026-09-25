@@ -1421,6 +1421,13 @@ class _CodexCompletionsAdapter:
         # The Codex endpoint rejects max_output_tokens/temperature (400) — omit.
         extra_body = kwargs.get("extra_body") or {}
         if isinstance(extra_body, dict):
+            response_format = extra_body.get("response_format") or kwargs.get("response_format")
+            if isinstance(response_format, dict):
+                if response_format.get("type") == "json_schema":
+                    schema = response_format.get("json_schema") or {}
+                    resp_kwargs["text"] = {"format": {"type": "json_schema", **schema}}
+                elif response_format.get("type") == "json_object":
+                    resp_kwargs["text"] = {"format": {"type": "json_object"}}
             # service_tier (fast mode) is a top-level Responses field; xAI's endpoint rejects it.
             service_tier = extra_body.get("service_tier")
             if isinstance(service_tier, str) and service_tier.strip() and not is_xai:
@@ -3261,9 +3268,11 @@ def _is_structured_output_rejection(exc: Exception) -> bool:
     # OBJECT-form json_schema by shape ("str type expected" on response_format.json_schema,
     # 422) rather than by naming the feature. The field is what they refuse; the retry
     # without it is the same remedy, so treat the shape error as a rejection too.
-    if "response_format" in err_lower and "json_schema" in err_lower:
+    if ("response_format" in err_lower or "text.format" in err_lower) and "json_schema" in err_lower:
         return True
-    return _is_unsupported_parameter_error(exc, "response_format") or _is_unsupported_parameter_error(exc, "output_config")
+    return (any(_is_unsupported_parameter_error(exc, field)
+                for field in ("response_format", "output_config", "text.format", "text"))
+            or ("text.format" in err_lower and "unavailable" in err_lower))
 
 
 def _without_structured_output_format(kwargs: dict) -> Optional[dict]:

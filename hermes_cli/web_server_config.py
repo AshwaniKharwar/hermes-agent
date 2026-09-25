@@ -68,6 +68,8 @@ _SCHEMA_OVERRIDES: Dict[str, Dict[str, Any]] = {
         *_timezone_options(), searchable=True, clearable=True,
     ),
     "memory.provider": _select("Memory provider plugin", *_memory_provider_options()),
+    "skills.workflow_execution": _select(
+        "Prefer executable workflows for explicit single-skill slash invocations", "prefer", "off"),
     "model": {
         "type": "string",
         "description": "Default model (e.g. anthropic/claude-sonnet-4.6)",

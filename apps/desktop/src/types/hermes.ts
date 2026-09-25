@@ -1081,10 +1081,12 @@ export interface SkillInfo {
 }
 
 export interface WorkflowGenerationStatus {
+  activation?: 'active' | 'candidate'
   error?: string
+  job_id?: string
   path?: string
   source_fingerprint?: string
-  status: 'already_valid' | 'failed' | 'generated' | 'regenerated'
+  status: 'already_valid' | 'candidate' | 'failed' | 'generated' | 'generating' | 'queued' | 'regenerated'
   updated_at: string
 }
 
@@ -1094,12 +1096,15 @@ export interface WorkflowStep {
   branches?: Record<string, string>
   input?: Record<string, unknown>
   max_iterations?: number
+  max_retries?: number
   next?: string
+  on_error?: string
   on_exhausted?: string
   output_schema?: Record<string, unknown>
   repeat?: string
   route?: Record<string, unknown>
   toolsets?: string[]
+  terminal_outcome?: 'success' | 'partial' | 'blocked'
 }
 
 export interface WorkflowInspection {

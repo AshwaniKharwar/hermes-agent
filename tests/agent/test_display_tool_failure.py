@@ -127,6 +127,11 @@ class TestDetectToolFailureStructured:
         result = json.dumps({"success": True, "data": "hello"})
         assert _detect_tool_failure("web_search", result) == (False, "")
 
+    def test_successful_skill_mutation_with_failed_workflow_generation(self):
+        result = json.dumps({"success": True, "operations_applied": 1,
+                             "workflow_generation": {"status": "failed", "error": "Invalid draft"}})
+        assert _detect_tool_failure("skill_manage", result) == (False, "")
+
 
 
 class TestGetCuteToolMessageFailureSuffix:

@@ -34,6 +34,7 @@ _SKILL_MULTI_HYPHEN = re.compile(r"-{2,}")
 # ``_scaffold_header``).
 _SKILL_INVOCATION_PREFIX = "[IMPORTANT: The user has invoked the "
 _SINGLE_SKILL_MARKER = "The full skill content is loaded below.]"
+_EXPLICIT_SLASH_SKILL_MARKER = "[Invocation source: explicit slash skill]"
 _SINGLE_SKILL_INSTRUCTION = "The user has provided the following instruction alongside the skill invocation: "
 _RUNTIME_NOTE = "\n\n[Runtime note:"
 _BUNDLE_MARKER = " skill bundle,"
@@ -91,6 +92,20 @@ def extract_user_instruction_from_skill_message(content: Any) -> Optional[str]:
         # The instruction follows the skill body (which may quote the marker): LAST marker is the user's.
         return _cut_after(content, _SINGLE_SKILL_INSTRUCTION, _RUNTIME_NOTE, content.rfind)
     return None
+
+
+def parse_single_skill_invocation(content: Any) -> Optional[tuple[str, str]]:
+    """Return only the explicit one-skill slash scaffold; bundles/other paths stay untouched."""
+    if not isinstance(content, str) or not content.startswith(_SKILL_INVOCATION_PREFIX):
+        return None
+    header = content.split("\n\n", 1)[0]
+    if (_BUNDLE_MARKER in header or _SINGLE_SKILL_MARKER not in header
+            or not header.endswith("\n" + _EXPLICIT_SLASH_SKILL_MARKER)):
+        return None
+    match = _SKILL_NAME_RE.match(content)
+    if not match or not match.group(1).strip() or match.group(1).lstrip().startswith("/"):
+        return None
+    return match.group(1).strip(), extract_user_instruction_from_skill_message(content) or ""
 
 
 def describe_skill_invocation(content: Any, separator: str = " — ") -> Optional[str]:
@@ -485,7 +500,8 @@ def build_skill_invocation_message(
     if not loaded:
         return None
     note = (f'[IMPORTANT: The user has invoked the "{loaded[2]}" skill, indicating they want '
-            "you to follow its instructions. The full skill content is loaded below.]")
+            "you to follow its instructions. The full skill content is loaded below.]\n"
+            f"{_EXPLICIT_SLASH_SKILL_MARKER}")
     return _render_skill_block(loaded, note, task_id, user_instruction=user_instruction, runtime_note=runtime_note)
 
 

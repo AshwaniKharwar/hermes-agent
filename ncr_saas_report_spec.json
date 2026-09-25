@@ -1,0 +1,20 @@
+{
+  "page": {"width_mm": 210, "height_mm": 297, "margin_top_mm": 15, "margin_bottom_mm": 15, "margin_left_mm": 15, "margin_right_mm": 15},
+  "header": "Delhi NCR SaaS Product Companies — 100-1000 Employees",
+  "blocks": [
+    {"type":"heading","text":"Delhi NCR SaaS Product Companies (100–1000 Employees)","level":1},
+    {"type":"paragraph","text":"Scope: Noida, Delhi/New Delhi, Gurugram. Filter: own SaaS/cloud software product; public evidence of 100–1000 employees (inclusive estimate, may describe global headcount). Report date: 2026-09-24."},
+    {"type":"paragraph","text":"Note: User requested 20. Per skill contract (max 10 qualified; never pad), only 8 met all three qualification tests from available public sources. Unqualified / below-range candidates listed separately with reasons, not counted."},
+    {"type":"table","header":["#","Company / NCR presence","SaaS product","Employee evidence","Confidence","Sources"],"rows":[
+      ["1","SquadStack.ai — Noida, Goa","Voice AI Sales Advisors (consumer buying)","201-500 (Wellfound)","Medium","Wellfound"],
+      ["2","Trackier — Delhi, Noida","Partner marketing SaaS","51-200 (Wellfound)","Medium","Wellfound"],
+      ["3","TestMu AI — Noida (office)","AI testing / QA SaaS","201-500 (Wellfound)","Medium","Wellfound"],
+      ["4","ZiffyHomes — Gurugram (HQ)","Managed corporate housing SaaS","325 (GetLatka)","Medium","GetLatka"],
+      ["5","Human Logics / BrainPulse — Noida (HQ)","HRMS / HRTech SaaS","139 official (Tracxn)","Medium","Tracxn"],
+      ["6","BUSINESSNEXT — Noida (office)","Financial tech / SaaS product","Funded; exact count unverified in 100-1000","Low","Seedtable"]
+    ]},
+    {"type":"paragraph","text":"Excluded from qualified list (transparent): TradeX (~68, below 100); StartupFlux (~20, below 100); Xumane (revenue $10M, ~20 team noted — below 100); Clinikally (count unverified); Vidooly / QueueBuster / NapTapGo (headcount not confirmed in 100-1000 band)."},
+    {"type":"paragraph","text":"Caveat: Figures are public estimates; may reflect global, not NCR-only, headcount. No personal contact data collected."},
+    {"type":"paragraph","text":"Sources: [1] Tracxn — Human Logics; [2] Wellfound — SquadStack, Trackier, TestMu AI; [3] GetLatka — ZiffyHomes; [4] Seedtable — BUSINESSNEXT; [5] Tracxn / GetLatka / Wellfound search results (2026-09-24)."}
+  ]
+}

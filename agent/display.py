@@ -939,8 +939,8 @@ def _detect_tool_failure(tool_name: str, result: Any) -> tuple[bool, str]:
         err = data.get("error") or data.get("message")
         if err and (failed or "error" in data):
             return True, f" [{_trim_error(str(err))}]"
-    # Multimodal results (dicts) are successes; failures arrive as JSON-encoded strings.
-    if isinstance(result, str) and (
+    # Only unstructured text needs the fallback; a parsed result may contain a nested failure.
+    if isinstance(result, str) and not isinstance(data, dict) and (
         '"error"' in result[:500].lower() or '"failed"' in result[:500].lower() or result.startswith("Error")
     ):
         return True, " [error]"

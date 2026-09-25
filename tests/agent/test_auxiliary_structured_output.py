@@ -137,3 +137,18 @@ def test_rejection_memo_is_per_model_and_ignores_schema_validation_errors():
     after = _build_call_kwargs("openai", "gpt-5-mini", messages,
                                extra_body={"response_format": dict(_JSON_SCHEMA)}, base_url="https://api.openai.com/v1")
     assert after["extra_body"]["response_format"] == _JSON_SCHEMA  # ... but never feeds the memo
+
+
+def test_codex_auxiliary_forwards_structured_output_to_responses():
+    from types import SimpleNamespace
+
+    from agent.auxiliary_client import _CodexCompletionsAdapter
+
+    client = SimpleNamespace(base_url="https://chatgpt.com/backend-api/codex")
+    adapter = _CodexCompletionsAdapter(client, "gpt-5.6-sol")
+    kwargs, _, _ = adapter._build_responses_kwargs({
+        "model": "gpt-5.6-sol", "messages": [{"role": "user", "content": "Compile a workflow"}],
+        "extra_body": {"response_format": _JSON_SCHEMA},
+    })
+    assert kwargs["text"]["format"] == {"type": "json_schema", **_JSON_SCHEMA["json_schema"]}
+    assert _is_structured_output_rejection(_Rejects400("Unsupported parameter: text.format"))

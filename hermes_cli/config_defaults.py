@@ -1364,6 +1364,11 @@ DEFAULT_CONFIG = {
     # Skills — external skill directories shared across tools/agents. Paths are expanded (~, ${VAR})
     # and resolved; read-only — creation goes to ~/.hermes/skills/ unless create_dir redirects it.
     "skills": {
+        # Explicit single /skill invocations prefer an executable workflow. "off" preserves
+        # prose-only skill execution and also disables background workflow compilation.
+        "workflow_execution": "prefer",
+        "workflow_receipt_retention_days": 30,
+        "workflow_receipt_max_runs": 1000,
         "external_dirs": [],   # e.g. ["~/.agents/skills", "/shared/team-skills"]
         # Where skill_manage-created skills go (empty = profile-local dir). When set, new skills
         # land here AND agent-facing instructions name this path; expanded (~, ${VAR}), relative to

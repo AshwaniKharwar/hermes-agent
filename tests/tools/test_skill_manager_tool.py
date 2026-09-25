@@ -63,6 +63,17 @@ description: Updated description.
 Step 1: Do the new thing.
 """
 
+WORKFLOW_CONTRACT = """
+## Workflow contract
+```yaml
+entry: act
+steps:
+  act: {kind: task, next: END, terminal_outcome: success}
+```
+"""
+CONTRACTED_SKILL_CONTENT = VALID_SKILL_CONTENT + WORKFLOW_CONTRACT
+CONTRACTED_SKILL_CONTENT_2 = VALID_SKILL_CONTENT_2 + WORKFLOW_CONTRACT
+
 VALID_WORKFLOW = """\
 schema: hermes/workflow@2
 id: default
@@ -79,6 +90,7 @@ steps:
     output_schema:
       type: object
     next: END
+    terminal_outcome: success
 output: {}
 """
 
@@ -224,13 +236,42 @@ class TestSynchronousWorkflowGeneration:
         monkeypatch.setattr("tools.skill_manager_tool._run_write_gate", lambda _staging: None)
         return skills
 
+    def test_create_requires_contract_before_saving_or_generation(self, tmp_path, monkeypatch):
+        skills = self._managed_home(tmp_path, monkeypatch)
+        monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda *_args: pytest.fail("must not compile"))
+        monkeypatch.setattr("tools.skill_manager_tool._apply_skill_write_gate",
+                            lambda *_args, **_kwargs: pytest.fail("must validate before staging"))
+        monkeypatch.setattr("tools.skill_manager_tool._run_write_gate",
+                            lambda *_args: pytest.fail("must validate before staging"))
+
+        single = json.loads(skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT))
+        batch = json.loads(skill_manage(action="", name="", operations=[
+            {"action": "create", "name": "test-skill", "content": VALID_SKILL_CONTENT},
+        ]))
+
+        assert single["success"] is False and "## Workflow contract" in single["error"]
+        assert batch["success"] is False and "## Workflow contract" in batch["error"]
+        assert not (skills / "test-skill").exists()
+
+    def test_edit_cannot_remove_existing_contract(self, tmp_path, monkeypatch):
+        skills = self._managed_home(tmp_path, monkeypatch)
+        monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda *_args: {
+            "path": "/overlay.yaml", "fingerprint": "source-hash"})
+        created = json.loads(skill_manage(action="create", name="test-skill", content=CONTRACTED_SKILL_CONTENT))
+
+        edited = json.loads(skill_manage(action="edit", name="test-skill", content=VALID_SKILL_CONTENT_2))
+
+        assert created["success"] is True
+        assert edited["success"] is False and "workflow contract" in edited["error"].lower()
+        assert (skills / "test-skill" / "SKILL.md").read_text() == CONTRACTED_SKILL_CONTENT
+
     def test_create_generates_before_skill_manage_returns(self, tmp_path, monkeypatch):
         self._managed_home(tmp_path, monkeypatch)
         calls = []
         monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda name, _workflow: calls.append(name) or {
             "path": f"/overlays/{name}.yaml", "fingerprint": "source-hash"})
 
-        result = json.loads(skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT))
+        result = json.loads(skill_manage(action="create", name="test-skill", content=CONTRACTED_SKILL_CONTENT))
 
         assert calls == ["test-skill"]
         assert result["workflow_generation"] == {
@@ -245,7 +286,7 @@ class TestSynchronousWorkflowGeneration:
             "path": f"/overlays/{name}.yaml", "fingerprint": "source-hash"})
 
         result = json.loads(skill_manage(action="", name="", operations=[
-            {"action": "create", "name": "test-skill", "content": VALID_SKILL_CONTENT},
+            {"action": "create", "name": "test-skill", "content": CONTRACTED_SKILL_CONTENT},
             {"action": "write_file", "name": "test-skill", "file_path": "scripts/run.py", "file_content": "pass"},
         ]))
 
@@ -255,13 +296,41 @@ class TestSynchronousWorkflowGeneration:
     def test_explicit_default_workflow_is_retained_without_compilation(self, tmp_path, monkeypatch):
         self._managed_home(tmp_path, monkeypatch)
         monkeypatch.setattr("hermes_cli.workflow_cmd._generate", lambda *_args: pytest.fail("must not compile"))
+        contracted_skill = VALID_SKILL_CONTENT + """
+## Workflow contract
+```yaml
+entry: act
+steps:
+  act: {kind: task, next: END, terminal_outcome: success}
+```
+"""
 
         result = json.loads(skill_manage(action="", name="", operations=[
-            {"action": "create", "name": "test-skill", "content": VALID_SKILL_CONTENT},
+            {"action": "create", "name": "test-skill", "content": contracted_skill},
             {"action": "write_file", "name": "test-skill", "file_path": "workflows/default.yaml", "file_content": VALID_WORKFLOW},
         ]))
 
         assert result["workflow_generation"]["test-skill"]["status"] == "already_valid"
+
+    def test_explicit_workflow_cannot_merge_skill_checkpoints(self, tmp_path, monkeypatch):
+        self._managed_home(tmp_path, monkeypatch)
+        content = VALID_SKILL_CONTENT + """
+## Workflow contract
+```yaml
+entry: discover_candidates
+steps:
+  discover_candidates: {kind: task, next: qualify_candidates}
+  qualify_candidates: {kind: task, next: draft_report}
+  draft_report: {kind: task, next: END, terminal_outcome: success}
+```
+"""
+        result = json.loads(skill_manage(action="", name="", operations=[
+            {"action": "create", "name": "test-skill", "content": content},
+            {"action": "write_file", "name": "test-skill", "file_path": "workflows/default.yaml",
+             "file_content": VALID_WORKFLOW},
+        ]))
+        assert result["success"] is False
+        assert "discover_candidates" in str(result)
 
 
 class TestEditSkill:
@@ -574,7 +643,7 @@ class TestSkillManageDispatcher:
         with _skill_dir(tmp_path):
             _create_skill("my-skill", VALID_SKILL_CONTENT)
             result = json.loads(skill_manage(action="", name="", operations=[
-                {"name": "sibling", "action": "create", "content": VALID_SKILL_CONTENT},
+                {"name": "sibling", "action": "create", "content": CONTRACTED_SKILL_CONTENT},
                 {"name": "my-skill", **op}]))
             bare = json.loads(skill_manage(action="", name="",
                                            operations=[{"name": "other", "action": "create"}]))
@@ -597,7 +666,7 @@ class TestSkillManageDispatcher:
         with _skill_dir(tmp_path):
             _create_skill("my-skill", VALID_SKILL_CONTENT)
             result = json.loads(skill_manage(action="", name="", operations=[
-                {"name": "sibling", "action": "create", "content": VALID_SKILL_CONTENT},
+                {"name": "sibling", "action": "create", "content": CONTRACTED_SKILL_CONTENT},
                 {"name": "my-skill", **op}]))
             sibling_created = _find_skill("sibling") is not None
 
@@ -655,7 +724,7 @@ class TestSkillManageDispatcher:
         or prune it).
         """
         with _skill_dir(tmp_path):
-            raw = skill_manage(action="create", name="test-skill", content=VALID_SKILL_CONTENT)
+            raw = skill_manage(action="create", name="test-skill", content=CONTRACTED_SKILL_CONTENT)
             from tools.skill_usage import load_usage
             usage = load_usage()
         result = json.loads(raw)
@@ -676,7 +745,7 @@ class TestSkillManageDispatcher:
             created = json.loads(skill_manage(
                 action="create",
                 name="test-skill",
-                content=VALID_SKILL_CONTENT,
+                content=CONTRACTED_SKILL_CONTENT,
                 task_id="task-mutation",
                 session_id="session-mutation",
             ))
@@ -691,7 +760,7 @@ class TestSkillManageDispatcher:
             edited = json.loads(skill_manage(
                 action="edit",
                 name="test-skill",
-                content=VALID_SKILL_CONTENT_2,
+                content=CONTRACTED_SKILL_CONTENT_2,
                 task_id="task-mutation",
                 session_id="session-mutation",
             ))
@@ -754,8 +823,8 @@ class TestSkillManageDispatcher:
                  patch("tools.skill_usage.is_hub_installed", return_value=False), \
                  patch("tools.skill_usage.is_bundled",
                        side_effect=lambda skill_name: skill_name == "bundled"):
-                skill_manage(action="create", name="umbrella", content=VALID_SKILL_CONTENT)
-                skill_manage(action="create", name="bundled", content=VALID_SKILL_CONTENT)
+                skill_manage(action="create", name="umbrella", content=CONTRACTED_SKILL_CONTENT)
+                skill_manage(action="create", name="bundled", content=CONTRACTED_SKILL_CONTENT)
                 raw = skill_manage(
                     action="delete",
                     name="bundled",
@@ -1117,7 +1186,7 @@ class TestBackgroundOwnershipPolicyConsistency:
         """Adoption is the documented path from refused to allowed."""
         monkeypatch.setenv("HERMES_HOME", str(tmp_path / ".hermes"))
         with _skill_dir(tmp_path):
-            _create_skill("adopt-me", VALID_SKILL_CONTENT)
+            _create_skill("adopt-me", CONTRACTED_SKILL_CONTENT)
             with patch("tools.skill_usage.load_usage", return_value={}):
                 before = self._bg_patch(
                     tmp_path, "adopt-me", "Do the thing.", "Do the new thing.",
@@ -1300,6 +1369,7 @@ def _skill_content(name: str) -> str:
         "---\n\n"
         f"# {name}\n\n"
         "Step 1: Do the thing.\n"
+        + WORKFLOW_CONTRACT
     )
 
 def _create_curator_skill(name: str, content: str):

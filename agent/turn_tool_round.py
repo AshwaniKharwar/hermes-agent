@@ -175,6 +175,20 @@ def run_tool_round(
                     agent.stream_delta_callback(None)
         return _verdict("break")
 
+    # A plain-language turn selects a skill through skill_view. Once that result is
+    # durably appended, prefer its active workflow exactly as slash invocation does.
+    from types import SimpleNamespace
+    from agent.workflow_turn import prefer_loaded_skill_workflow
+    workflow_state = SimpleNamespace(
+        effective_task_id=effective_task_id, final_response=final_response,
+        failed=failed, interrupted=False, _turn_exit_reason=_turn_exit_reason,
+    )
+    if prefer_loaded_skill_workflow(agent, workflow_state, assistant_message, messages, user_message) is not None:
+        final_response = workflow_state.final_response
+        failed = workflow_state.failed
+        _turn_exit_reason = workflow_state._turn_exit_reason
+        return _verdict("break")
+
     # Reset per-turn retry counters so one truncation can't poison the turn.
     truncated_tool_call_retries = 0
     # Defer the paragraph break: _fire_stream_delta() prepends one "\n\n" when real
