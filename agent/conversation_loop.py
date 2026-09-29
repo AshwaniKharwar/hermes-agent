@@ -1508,6 +1508,12 @@ def _run_conversation_turn(
         max_compression_attempts=getattr(agent, "max_compression_attempts", 3),
         **{f.name: getattr(_ctx, f.name.lstrip("_")) for f in fields(_LoopState) if f.name in _CTX_FIELDS},
     )
+    from agent.skill_workflow_turn import route_skill_workflow
+    if route_skill_workflow(agent, s):
+        return finalize_turn(agent, **{
+            name: getattr(s, name)
+            for name in inspect.signature(finalize_turn).parameters if name != "agent"
+        })
     # Opt-in runtime: api_mode == codex_app_server hands the whole turn to the codex
     # app-server subprocess (see agent/transports/codex_app_server_session.py).
     if agent.api_mode == "codex_app_server":

@@ -1332,6 +1332,58 @@ def _tap_cli(args) -> None:
     do_tap(tap_action, repo=getattr(args, "repo", "") or getattr(args, "name", ""))
 
 
+def do_workflow_generate(name: str | None = None, *, all_skills: bool = False,
+                         console: Optional[Console] = None) -> None:
+    """Enroll existing installed skills; a live profile turn starts the writer subagents."""
+    from agent.skill_utils import get_all_skills_dirs
+    from agent.skill_workflow_store import graph_state, read_record, record_committed_skill, workflow_dir
+    from tools.skill_manager_tool import _find_skill, _iter_skill_dirs, _skills_dir
+
+    c = console or _console
+    if not all_skills and not name:
+        c.print("Usage: hermes skills workflow generate <name> | --all")
+        return
+    names = [name] if name else []
+    if all_skills:
+        local_root = _skills_dir().resolve()
+        for root in get_all_skills_dirs():
+            for skill_dir in _iter_skill_dirs(root):
+                identifier = (skill_dir.resolve().relative_to(local_root).as_posix()
+                              if skill_dir.resolve().is_relative_to(local_root) else skill_dir.name)
+                found = _find_skill(identifier)
+                if found and found["path"].resolve() == skill_dir.resolve():
+                    names.append(identifier)
+    queued, skipped, missing = [], [], []
+    for identifier in dict.fromkeys(names):
+        found = _find_skill(identifier)
+        if not found:
+            missing.append(identifier)
+            continue
+        directory = workflow_dir(found["path"])
+        record = read_record(directory)
+        if record and graph_state(directory, record)[0] in {"ready", "awaiting_approval"}:
+            skipped.append(identifier)
+            continue
+        if record_committed_skill(identifier, "create"):
+            queued.append(identifier)
+    if queued:
+        c.print(f"Queued {len(queued)} workflow(s): {', '.join(queued)}. "
+                "Start a chat turn in this profile to generate them.")
+    if skipped:
+        c.print(f"Already ready or awaiting approval: {', '.join(skipped)}")
+    if missing:
+        c.print(f"Skill not found in this profile: {', '.join(missing)}")
+    if not queued and not skipped and not missing:
+        c.print("No installed skills found in this profile.")
+
+
+def _workflow_cli(args) -> None:
+    if getattr(args, "workflow_action", None) == "generate":
+        do_workflow_generate(getattr(args, "name", None), all_skills=getattr(args, "all", False))
+    else:
+        _console.print("Usage: hermes skills workflow generate <name> | --all")
+
+
 # `hermes skills <action>` -> handler(args). Lambdas late-bind the do_* names so
 # tests that patch("hermes_cli.skills_hub.do_install") still intercept.
 _CLI_ACTIONS = {
@@ -1359,14 +1411,14 @@ _CLI_ACTIONS = {
                                                     skip_confirm=getattr(a, "yes", False)),
     "publish": lambda a: do_publish(a.skill_path, target=getattr(a, "to", "github"),
                                     repo=getattr(a, "repo", "")),
-    "snapshot": _snapshot_cli, "tap": _tap_cli}
+    "snapshot": _snapshot_cli, "tap": _tap_cli, "workflow": _workflow_cli}
 
 
 def skills_command(args) -> None:
     """Router for `hermes skills <subcommand>` — called from hermes_cli/main.py."""
     handler = _CLI_ACTIONS.get(getattr(args, "skills_action", None))
     if handler is None:
-        _console.print("Usage: hermes skills [browse|search|install|inspect|list|list-modified|diff|check|update|audit|uninstall|reset|opt-out|opt-in|publish|snapshot|tap]\n")
+        _console.print("Usage: hermes skills [browse|search|install|inspect|list|workflow|list-modified|diff|check|update|audit|uninstall|reset|opt-out|opt-in|publish|snapshot|tap]\n")
         _console.print("Run 'hermes skills <command> --help' for details.\n")
         return
     handler(args)
@@ -1419,6 +1471,15 @@ def _slash_snapshot(args, c):
         c.print("[bold red]Usage:[/] /skills snapshot export <file> | /skills snapshot import <file>\n")
 
 
+def _slash_workflow(args, c):
+    if len(args) == 2 and args[0] == "generate" and args[1] == "--all":
+        do_workflow_generate(all_skills=True, console=c)
+    elif len(args) == 2 and args[0] == "generate" and not args[1].startswith("--"):
+        do_workflow_generate(args[1], console=c)
+    else:
+        c.print("[bold red]Usage:[/] /skills workflow generate <name> | --all")
+
+
 def _first_positional(args):
     """First argument unless it is a flag (audit's historical parse)."""
     return args[0] if args and not args[0].startswith("--") else None
@@ -1458,6 +1519,7 @@ _SLASH_ACTIONS = {
         args[0], target=_opt_value(args, "--to", "github", last=True),
         repo=_opt_value(args, "--repo", "", last=True), console=c),
     "snapshot": _slash_snapshot,
+    "workflow": _slash_workflow,
     "tap": lambda args, c: (do_tap(args[0], repo=args[1] if len(args) > 1 else "", console=c)
                             if args else do_tap("list", console=c)),
     **dict.fromkeys(("help", "--help", "-h"), lambda args, c: _print_skills_help(c))}
@@ -1509,6 +1571,7 @@ def _print_skills_help(console: Console) -> None:
         "  [cyan]inspect[/] <identifier>        Preview a skill without installing\n"
         "  [cyan]list[/] [--source hub|builtin|local] [--enabled-only]\n"
         "       List installed skills; --enabled-only filters to the active profile's live set\n"
+        "  [cyan]workflow generate[/] <name>|--all  Queue graphs for installed skills\n"
         "  [cyan]check[/] [name]                Check hub skills for upstream updates\n"
         "  [cyan]update[/] [name]               Update hub skills with upstream changes\n"
         "  [cyan]audit[/] [name]                Re-scan hub skills for security\n"

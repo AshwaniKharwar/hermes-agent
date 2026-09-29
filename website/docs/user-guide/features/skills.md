@@ -207,6 +207,58 @@ Level 2: skill_view(name, path)  → Specific reference file       (varies)
 
 The agent only loads the full skill content when it actually needs it.
 
+### Workflows for agent-created skills
+
+After an approved `skill_manage(create)`, Hermes queues separate subagents to extract a
+quote-backed checklist from `SKILL.md`, draft a LangGraph workflow, and review its coverage.
+Repeated quotes become one checklist item. If a draft omits a coverage ID but its node goal
+already fulfills that item, the reviewer can assign the ID with exact goal text as evidence;
+trusted validation still checks the completed graph before activation.
+The graph and its run checkpoints live under the active
+profile's `workflows/` directory, even when `skills.create_dir` points to a shared location.
+The graph becomes active after validation and, when `skills.write_approval` is enabled,
+approval through `/skills pending`, `/skills diff <id>`, and `/skills approve <id>`.
+If approval happens without a live agent turn, drafting starts on the next turn for that profile.
+Rejecting a draft blocks tasks matched to that skill until the skill changes or you queue
+generation again.
+
+To queue a workflow for an existing installed skill, run `hermes skills workflow generate <name>`
+(or `/skills workflow generate <name>` in the interactive CLI). Use `--all` in place of
+`<name>` to queue every skill in the profile, create, and external skill directories. The command records
+pending work; the next chat turn in that profile starts generation with a live Hermes agent.
+Already active or awaiting-approval graphs are skipped. Use
+`hermes -p <profile> skills workflow generate ...` for a named profile.
+
+An explicit `/skill-name` invocation routes to its active graph. Hermes also checks normal
+requests against skill and workflow descriptions before the main agent acts. A matching, ready
+workflow owns the turn; each graph step runs a Hermes subagent. If a required graph is missing,
+stale, or invalid, Hermes announces the condition, starts a parallel repair, and completes that
+request directly from the skill. A graph awaiting approval or rejected cannot run until it is
+approved or regenerated. A graph that fails after starting stops with an error, because
+repeating completed steps could duplicate their effects. A routing error also stops the turn.
+Graph nodes declare request inputs, named outputs from earlier nodes, and external effects. Hermes
+extracts quoted request facts for each node and passes only its declared earlier outputs; it does
+not pass the full request or unrelated node results to the node subagent. Node names, goals,
+inputs, outputs, effects, and edges come from that skill's generated
+graph; the runner does not prescribe task-specific nodes. Graph validation prevents an effect node
+from being revisited. The child is instructed to perform each declared effect once and report an
+uncertain outcome without repeating it; arbitrary tool commands are not independently constrained
+by these declarations.
+Each execution node inherits the parent agent's available tools; the graph does not limit tools by node.
+The profile's graph directory contains `requirements.json` for the approved checklist,
+`requirements_draft.json` and `generation.jsonl` for generation diagnostics, and `state.json`
+for the latest status. A failed generation gets two automatic retries on later profile turns;
+after that, edit the skill or run `skills workflow generate` to queue another attempt. An
+interrupted attempt does not consume a retry. Graphs created with an older version are invalidated
+and queued for repair on the next matching turn.
+Skills without a workflow requirement can run directly. Existing and installed skills are not
+automatically converted.
+
+Each graph run writes timestamped JSONL events to
+`<profile>/workflows/<skill-name>/runs/<time>_<day-month-year>-<Hermes-session-id>-<run-id>.jsonl`.
+The events record run start and completion, node start and completion (including declared effects),
+and failures. LangGraph checkpoints remain in the graph directory's `runs.sqlite`.
+
 ## SKILL.md Format
 
 ```markdown
