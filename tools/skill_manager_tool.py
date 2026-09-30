@@ -598,6 +598,8 @@ def _remove_file(name: str, file_path: str) -> Dict[str, Any]:
 # Set while replaying an approved staged skill write so skill_manage() does not re-gate it.
 _skill_gate_bypass: "_ctxvars.ContextVar[bool]" = _ctxvars.ContextVar(
     "skill_gate_bypass", default=False)
+_batch_workflow_commit: "_ctxvars.ContextVar[bool]" = _ctxvars.ContextVar(
+    "batch_workflow_commit", default=False)
 
 
 def _run_write_gate(build_staging):
@@ -646,6 +648,9 @@ def _skill_manage_from(payload: Dict[str, Any], **extra) -> str:
 
 def apply_skill_pending(payload: Dict[str, Any]) -> str:
     """Replay a staged skill write, bypassing the gate (the /skills approve handler)."""
+    if payload.get("action") == "workflow_publish":
+        from agent.skill_workflow_generation import publish_graph
+        return json.dumps(publish_graph(payload), ensure_ascii=False)
     token = _skill_gate_bypass.set(True)
     try:
         return _skill_manage_from(payload)
@@ -798,6 +803,16 @@ def skill_manage(
             _record_success(
                 action, name, result, file_path=file_path, absorbed_into=absorbed_into,
                 task_id=task_id, session_id=session_id, ledger_before=_ledger_before)
+    if result.get("success") and action != "delete" and not _batch_workflow_commit.get():
+        try:
+            from agent.skill_workflow_store import record_committed_skill
+            from agent.skill_workflow_generation import schedule_repair
+            record = record_committed_skill(name, action)
+            if record:
+                schedule_repair(record)
+        except Exception as exc:
+            logger.warning("Skill workflow setup failed for %s: %s", name, exc, exc_info=True)
+            result["workflow_error"] = str(exc)
     return json.dumps(result, ensure_ascii=False)
 
 

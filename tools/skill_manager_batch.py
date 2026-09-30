@@ -228,6 +228,7 @@ def _skill_manage_batch(operations, default_name: str = None, task_id: str = Non
         results = []
         rollback_failed = False
         token = _smt._skill_gate_bypass.set(True)
+        workflow_token = _smt._batch_workflow_commit.set(True)
         try:
             for i, op in enumerate(operations):
                 raw = _smt._skill_manage_from({**op, "name": names[i], "operations": None},
@@ -252,6 +253,7 @@ def _skill_manage_batch(operations, default_name: str = None, task_id: str = Non
                 results.append({"name": names[i], "action": op["action"],
                                 "file_path": op.get("file_path"), "success": True})
         finally:
+            _smt._batch_workflow_commit.reset(workflow_token)
             _smt._skill_gate_bypass.reset(token)
             if rollback_failed:
                 # Keep the snapshots so the operator can still recover by hand.
@@ -262,6 +264,15 @@ def _skill_manage_batch(operations, default_name: str = None, task_id: str = Non
     # stray non-UTF-8 bytes. Pinning UTF-8 with replacement keeps skill_view deterministic across platforms
     # — falling back to the machine locale (cp1252/GBK) would make the same skill render differently per
     # host (see PR #51701).
+    try:
+        from agent.skill_workflow_store import record_committed_skill
+        from agent.skill_workflow_generation import schedule_repair
+        for name, action in dict.fromkeys((row["name"], row["action"]) for row in results):
+            record = record_committed_skill(name, action)
+            if record:
+                schedule_repair(record)
+    except Exception as exc:
+        logger.warning("Skill workflow setup failed after batch commit: %s", exc, exc_info=True)
     return json.dumps(
         {"success": True, "operations_applied": len(results), "results": results},
         ensure_ascii=False)

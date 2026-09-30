@@ -110,10 +110,19 @@ def _reject(subsystem: str, rest: List[str]) -> str:
     if not rest:
         return _usage(subsystem)
     target = rest[0]
+    def discard(rec):
+        if not wa.discard_pending(subsystem, rec["id"]):
+            return False
+        if subsystem == wa.SKILLS and rec.get("payload", {}).get("action") == "workflow_publish":
+            from agent.skill_workflow_generation import reject_graph
+            reject_graph(rec["payload"])
+        return True
+
     if target.lower() == "all":
-        n = sum(1 for rec in wa.list_pending(subsystem) if wa.discard_pending(subsystem, rec["id"]))
+        n = sum(1 for rec in wa.list_pending(subsystem) if discard(rec))
         return f"Rejected {n} pending {subsystem} write(s)."
-    if wa.discard_pending(subsystem, target):
+    rec = wa.get_pending(subsystem, target)
+    if rec and discard(rec):
         return f"Rejected pending {subsystem} write '{target}'."
     return f"No pending {subsystem} write with id '{target}'."
 

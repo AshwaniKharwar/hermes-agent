@@ -72,6 +72,13 @@ def build_skills_parser(subparsers, *, cmd_skills: Callable) -> None:
         help="Hide disabled skills. Use with -p <profile> to see exactly "
         "which skills will load for that profile.")
 
+    skills_workflow = skills_subparsers.add_parser("workflow", help="Generate workflows for installed skills")
+    workflow_subparsers = skills_workflow.add_subparsers(dest="workflow_action")
+    workflow_generate = workflow_subparsers.add_parser("generate", help="Queue workflow generation")
+    workflow_target = workflow_generate.add_mutually_exclusive_group(required=True)
+    workflow_target.add_argument("name", nargs="?", help="Installed skill name")
+    workflow_target.add_argument("--all", action="store_true", help="All installed skills in this profile")
+
     skills_check = skills_subparsers.add_parser(
         "check", help="Check installed hub skills for updates")
     skills_check.add_argument("name", nargs="?", help="Specific skill to check (default: all)")

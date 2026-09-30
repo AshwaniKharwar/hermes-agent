@@ -52,6 +52,7 @@ class SubagentLaunchRequest:
     role: str = "leaf"
     model: Optional[str] = None
     allowed_toolsets: Optional[tuple[str, ...]] = None
+    include_workspace_context: bool = True
     blocked_tools: tuple[str, ...] = ()
     working_directory: Optional[str] = None
     parent_session_id: Optional[str] = None
@@ -221,6 +222,7 @@ _REQUEST_REJECTIONS: tuple[tuple[Callable[[Any], bool], str], ...] = (
      "goal must be a non-empty string of at most 16000 characters."),
     (lambda r: r.context is not None and (not isinstance(r.context, str) or len(r.context) > _MAX_CONTEXT_CHARS),
      "context must be a string of at most 32000 characters."),
+    (lambda r: type(r.include_workspace_context) is not bool, "include_workspace_context must be a boolean."),
     (lambda r: r.role not in {"leaf", "orchestrator"}, "role must be 'leaf' or 'orchestrator'."),
     (lambda r: r.timeout_seconds is not None, "Per-launch timeout is not supported; configure delegation timeout explicitly."),
     (lambda r: r.working_directory is not None,
@@ -259,8 +261,10 @@ class SubagentLifecycleService:
         from tools.delegate_tool import _build_child_preserving_parent_tools, DEFAULT_MAX_ITERATIONS
         child = _build_child_preserving_parent_tools(
             task_index=0, goal=request.goal, context=request.context,
-            toolsets=list(request.allowed_toolsets) if request.allowed_toolsets else None,
+            toolsets=list(request.allowed_toolsets) if request.allowed_toolsets is not None else None,
             model=request.model, max_iterations=DEFAULT_MAX_ITERATIONS, task_count=1, parent_agent=parent, role=request.role,
+            strict_toolsets=request.allowed_toolsets is not None,
+            include_workspace_context=request.include_workspace_context,
         )
         subagent_id = str(getattr(child, "_subagent_id", "") or "")
         if not subagent_id:
@@ -276,7 +280,9 @@ class SubagentLifecycleService:
             _REGISTRY.records[subagent_id] = record
             if request.correlation_id:
                 _REGISTRY.correlations[correlation_key] = subagent_id
-        record.future = _EXECUTOR.submit(self._run, record, request.goal, parent)
+        # A served profile is carried by ContextVars, not process environment.  A
+        # lifecycle child may outlive the invoking turn, so copy its owning scope.
+        record.future = _EXECUTOR.submit(contextvars.copy_context().run, self._run, record, request.goal, parent)
         return handle
 
     def status(self, handle: SubagentHandle) -> SubagentStatus:
@@ -405,12 +411,14 @@ class SubagentLifecycleService:
             raise SubagentLifecycleError("metadata must be JSON-serializable.") from exc
         if metadata_bytes > _MAX_METADATA_BYTES:
             raise SubagentLifecycleError("metadata exceeds 8192 bytes.")
-        if not request.allowed_toolsets:
+        if request.allowed_toolsets is None:
             return
         from toolsets import TOOLSETS
         unknown = set(request.allowed_toolsets) - set(TOOLSETS)
         if unknown:
             raise SubagentLifecycleError(f"Unknown toolsets: {', '.join(sorted(unknown))}.")
         enabled = getattr(parent, "enabled_toolsets", None)
-        if enabled is not None and not set(request.allowed_toolsets).issubset(set(enabled)):
-            raise SubagentLifecycleError("Requested toolsets would broaden parent permissions.")
+        if enabled is not None:
+            from tools.delegate_tool_toolsets import _expand_parent_toolsets
+            if not set(request.allowed_toolsets).issubset(_expand_parent_toolsets(set(enabled))):
+                raise SubagentLifecycleError("Requested toolsets would broaden parent permissions.")

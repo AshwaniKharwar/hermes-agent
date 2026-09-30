@@ -253,6 +253,9 @@ def skill_pending_diff(record: Dict[str, Any]) -> str:
     payload = record.get("payload", {})
     action = payload.get("action", "")
     name = payload.get("name", "")
+    if action == "workflow_publish":
+        return json.dumps({"requirements": payload.get("checklist", []),
+                           "graph": payload.get("graph", {})}, indent=2, ensure_ascii=False)
     if action == "create":
         return payload.get("content") or ""
     if action not in {"edit", "patch", "write_file"}:

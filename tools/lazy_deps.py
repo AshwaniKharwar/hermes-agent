@@ -33,6 +33,7 @@ logger = logging.getLogger(__name__)
 # (security posture); bump here AND in pyproject. Shared patched floors (aiohttp==3.14.3,
 # starlette==1.3.1) are literals in every feature: tests/test_packaging_metadata.py checks by AST.
 LAZY_DEPS: dict[str, tuple[str, ...]] = {
+    "skill.workflow": ("langgraph==1.2.11", "langgraph-checkpoint-sqlite==3.1.1"),
     # ─── Inference providers ───────────────────────────────────────────────
     # Native Anthropic SDK (provider=anthropic; aggregators use the openai SDK).
     "provider.anthropic": ("anthropic==0.87.0",),  # CVE-2026-34450, CVE-2026-34452
